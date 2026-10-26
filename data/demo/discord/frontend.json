@@ -1,0 +1,425 @@
+{
+  "guild": {
+    "id": "1290000000000000001",
+    "name": "CampusEats Team",
+    "iconUrl": ""
+  },
+  "channel": {
+    "id": "1290000000000001002",
+    "type": "GuildTextChat",
+    "categoryId": "1290000000000000900",
+    "category": "Project",
+    "name": "frontend",
+    "topic": null
+  },
+  "dateRange": {
+    "after": null,
+    "before": null
+  },
+  "exportedAt": "2026-10-26T09:00:00.000+05:30",
+  "messages": [
+    {
+      "id": "1555919850700800022",
+      "type": "Default",
+      "timestamp": "2026-10-03T18:00:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "login page ka PR #14 daala, OTP flow bhi hai",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": []
+    },
+    {
+      "id": "1556194158182400023",
+      "type": "Default",
+      "timestamp": "2026-10-04T12:10:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "login merge ho gaya, Notion pe Done kar diya ✅",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": []
+    },
+    {
+      "id": "1560692549222400024",
+      "type": "Default",
+      "timestamp": "2026-10-16T22:05:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "@aarav_m login wala page phir se crash ho raha hai OTP daalne ke baad, white screen aa rahi hai",
+      "author": {
+        "id": "1290000000000000100",
+        "name": "siddhi.k",
+        "discriminator": "0000",
+        "nickname": "Siddhi K",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [
+        {
+          "id": "1290000000000000101",
+          "name": "aarav_m",
+          "discriminator": "0000",
+          "nickname": "Aarav M",
+          "color": null,
+          "isBot": false,
+          "roles": [],
+          "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+        }
+      ],
+      "inlineEmojis": []
+    },
+    {
+      "id": "1560696324096000025",
+      "type": "Reply",
+      "timestamp": "2026-10-16T22:20:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "arre yaar 😑 dekhta hu. issue reopen kar diya",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": [],
+      "reference": {
+        "messageId": "1560692549222400024",
+        "channelId": "1290000000000001002",
+        "guildId": "1290000000000000001"
+      }
+    },
+    {
+      "id": "1561102752153600026",
+      "type": "Default",
+      "timestamp": "2026-10-18T01:15:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "cart UI maine bana diya kal raat, aarav ko time nahi mil raha tha. PR #18",
+      "author": {
+        "id": "1290000000000000100",
+        "name": "siddhi.k",
+        "discriminator": "0000",
+        "nickname": "Siddhi K",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": []
+    },
+    {
+      "id": "1561104010444800027",
+      "type": "Reply",
+      "timestamp": "2026-10-18T01:20:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "@aarav_m review kar dena jab time mile",
+      "author": {
+        "id": "1290000000000000100",
+        "name": "siddhi.k",
+        "discriminator": "0000",
+        "nickname": "Siddhi K",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [
+        {
+          "id": "1290000000000000101",
+          "name": "aarav_m",
+          "discriminator": "0000",
+          "nickname": "Aarav M",
+          "color": null,
+          "isBot": false,
+          "roles": [],
+          "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+        }
+      ],
+      "inlineEmojis": [],
+      "reference": {
+        "messageId": "1561102752153600026",
+        "channelId": "1290000000000001002",
+        "guildId": "1290000000000000001"
+      }
+    },
+    {
+      "id": "1561235376046080028",
+      "type": "Reply",
+      "timestamp": "2026-10-18T10:02:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "thanks yaar! review kar diya, ek do comments hai",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": [],
+      "reference": {
+        "messageId": "1561104010444800027",
+        "channelId": "1290000000000001002",
+        "guildId": "1290000000000000001"
+      }
+    },
+    {
+      "id": "1562105610240000029",
+      "type": "Default",
+      "timestamp": "2026-10-20T19:40:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "tracking screen 2nd Nov tak ho jayega",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": []
+    },
+    {
+      "id": "1562106113556480030",
+      "type": "Default",
+      "timestamp": "2026-10-20T19:42:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "Google Maps API key ke liye billing account chahiye, card kisi ke paas nahi hai. isliye atka hua hai",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": []
+    },
+    {
+      "id": "1562109385113600031",
+      "type": "Reply",
+      "timestamp": "2026-10-20T19:55:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "Maps ki jagah Leaflet + OpenStreetMap use kar, free hai, key nahi chahiye",
+      "author": {
+        "id": "1290000000000000102",
+        "name": "priya.codes",
+        "discriminator": "0000",
+        "nickname": "Priya S",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": [],
+      "reference": {
+        "messageId": "1562106113556480030",
+        "channelId": "1290000000000001002",
+        "guildId": "1290000000000000001"
+      }
+    },
+    {
+      "id": "1562113159987200032",
+      "type": "Reply",
+      "timestamp": "2026-10-20T20:10:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "sahi hai, Leaflet hi lagate hai",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": [],
+      "reference": {
+        "messageId": "1562109385113600031",
+        "channelId": "1290000000000001002",
+        "guildId": "1290000000000000001"
+      }
+    },
+    {
+      "id": "1563160058265600033",
+      "type": "Default",
+      "timestamp": "2026-10-23T17:30:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "login crash abhi bhi fix nahi hua, OTP verify ke baad session null aa raha hai. backend se token aa raha hai kya?",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": []
+    },
+    {
+      "id": "1563163833139200034",
+      "type": "Reply",
+      "timestamp": "2026-10-23T17:45:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "token aa raha hai, tu localStorage me galat key se padh raha hai shayad — 'authToken' vs 'token'",
+      "author": {
+        "id": "1290000000000000100",
+        "name": "siddhi.k",
+        "discriminator": "0000",
+        "nickname": "Siddhi K",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": [],
+      "reference": {
+        "messageId": "1563160058265600033",
+        "channelId": "1290000000000001002",
+        "guildId": "1290000000000000001"
+      }
+    },
+    {
+      "id": "1563960331468800035",
+      "type": "Default",
+      "timestamp": "2026-10-25T22:30:00.000+05:30",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": false,
+      "content": "PR #19 tracking screen ka draft daala hai, Leaflet map aa raha hai",
+      "author": {
+        "id": "1290000000000000101",
+        "name": "aarav_m",
+        "discriminator": "0000",
+        "nickname": "Aarav M",
+        "color": null,
+        "isBot": false,
+        "roles": [],
+        "avatarUrl": "https://cdn.discordapp.com/embed/avatars/0.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "inlineEmojis": []
+    }
+  ],
+  "messageCount": 14
+}

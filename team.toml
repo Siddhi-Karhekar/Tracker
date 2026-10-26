@@ -1,0 +1,20 @@
+# Your real team. One [members.<handle>] block per person.
+# The handle is TeamPulse's internal id; the rest map each platform identity to it.
+# Find IDs with:  python -m teampulse.ingest.whoami   (after filling .env)
+# For the seeded demo, TeamPulse uses data/demo/team.toml instead.
+
+[members.siddhi]
+display_name   = "Siddhi Karhekar"
+github         = "Siddhi-Karhekar"
+notion_user_id = ""        # Notion user UUID
+discord_id     = ""        # right-click user in Discord (Developer Mode on) → Copy User ID
+discord_name   = ""
+opted_in       = true
+
+# [members.teammate2]
+# display_name   = ""
+# github         = ""
+# notion_user_id = ""
+# discord_id     = ""
+# discord_name   = ""
+# opted_in       = true

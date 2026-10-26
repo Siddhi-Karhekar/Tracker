@@ -1,0 +1,18 @@
+# Week 1–2: seeding + ingestion
+PyGithub>=2.3
+notion-client>=2.5      # 2.5+ / 3.x speak Notion API 2025-09-03 (data sources)
+discord.py>=2.4
+python-dotenv>=1.0
+requests>=2.31
+pytest>=8.0
+
+# Later weeks (uncomment when you get there)
+# langgraph
+# langchain-groq
+# langchain-google-genai
+# langchain-ollama
+# chromadb
+# sentence-transformers
+# streamlit
+# arize-phoenix
+# ragas

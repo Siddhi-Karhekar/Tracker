@@ -1,0 +1,526 @@
+[
+  {
+    "issue": {
+      "number": 1,
+      "title": "Login & signup with OTP",
+      "body": "Phone-number login with OTP, signup form, session handling.",
+      "state": "open",
+      "state_reason": "reopened",
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "aarav-m",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "frontend"
+        },
+        {
+          "name": "auth"
+        }
+      ],
+      "milestone": {
+        "number": 2,
+        "title": "Sprint 2",
+        "due_on": "2026-10-10T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:10:00Z",
+      "updated_at": "2026-10-23T12:20:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/1"
+    },
+    "comments": [
+      {
+        "id": 1073305838874,
+        "user": {
+          "login": "siddhi-k",
+          "type": "User"
+        },
+        "body": "Crashes after OTP entry: white screen on Android Chrome. Reopening?",
+        "created_at": "2026-10-16T16:40:00Z",
+        "html_url": "https://github.com/campuseats/campuseats-app/issues/1#issuecomment-1"
+      },
+      {
+        "id": 146539801584,
+        "user": {
+          "login": "siddhi-k",
+          "type": "User"
+        },
+        "body": "Token is returned by /auth/verify; frontend reads localStorage 'authToken' but we store 'token'.",
+        "created_at": "2026-10-23T12:20:00Z",
+        "html_url": "https://github.com/campuseats/campuseats-app/issues/1#issuecomment-2"
+      }
+    ],
+    "events": [
+      {
+        "id": 445489599502,
+        "event": "closed",
+        "actor": {
+          "login": "aarav-m",
+          "type": "User"
+        },
+        "created_at": "2026-10-04T06:20:00Z"
+      },
+      {
+        "id": 792482456295,
+        "event": "reopened",
+        "actor": {
+          "login": "aarav-m",
+          "type": "User"
+        },
+        "created_at": "2026-10-16T16:48:00Z"
+      }
+    ]
+  },
+  {
+    "issue": {
+      "number": 2,
+      "title": "Menu API (list, item detail, availability)",
+      "body": "REST endpoints for the canteen menu, with daily availability.",
+      "state": "closed",
+      "state_reason": "completed",
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "siddhi-k",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "backend"
+        }
+      ],
+      "milestone": {
+        "number": 1,
+        "title": "Sprint 1",
+        "due_on": "2026-10-03T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:12:00Z",
+      "updated_at": "2026-10-02T05:30:00Z",
+      "closed_at": "2026-10-02T05:30:00Z",
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/2"
+    },
+    "comments": [],
+    "events": [
+      {
+        "id": 55735207695,
+        "event": "closed",
+        "actor": {
+          "login": "siddhi-k",
+          "type": "User"
+        },
+        "created_at": "2026-10-02T05:30:00Z"
+      }
+    ]
+  },
+  {
+    "issue": {
+      "number": 3,
+      "title": "Payment gateway (Razorpay test mode)",
+      "body": "Integrate Razorpay checkout in test mode, verify webhook signature.",
+      "state": "closed",
+      "state_reason": "completed",
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "rohan-d",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "backend"
+        },
+        {
+          "name": "payments"
+        }
+      ],
+      "milestone": {
+        "number": 3,
+        "title": "Sprint 3",
+        "due_on": "2026-10-24T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:14:00Z",
+      "updated_at": "2026-10-16T10:00:00Z",
+      "closed_at": "2026-10-16T10:00:00Z",
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/3"
+    },
+    "comments": [],
+    "events": [
+      {
+        "id": 1028308769850,
+        "event": "closed",
+        "actor": {
+          "login": "siddhi-k",
+          "type": "User"
+        },
+        "created_at": "2026-10-16T10:00:00Z"
+      }
+    ]
+  },
+  {
+    "issue": {
+      "number": 4,
+      "title": "Order tracking screen",
+      "body": "Live order status + pickup counter location on a map.",
+      "state": "open",
+      "state_reason": null,
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "aarav-m",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "frontend"
+        }
+      ],
+      "milestone": {
+        "number": 4,
+        "title": "Sprint 4",
+        "due_on": "2026-11-05T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:16:00Z",
+      "updated_at": "2026-09-28T13:16:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/4"
+    },
+    "comments": [],
+    "events": []
+  },
+  {
+    "issue": {
+      "number": 5,
+      "title": "Recommendation model (what to order)",
+      "body": "Suggest items from order history; handle new users.",
+      "state": "closed",
+      "state_reason": "completed",
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "priya-s",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "ml"
+        }
+      ],
+      "milestone": {
+        "number": 3,
+        "title": "Sprint 3",
+        "due_on": "2026-10-24T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:18:00Z",
+      "updated_at": "2026-10-17T13:00:00Z",
+      "closed_at": "2026-10-17T13:00:00Z",
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/5"
+    },
+    "comments": [],
+    "events": [
+      {
+        "id": 565782529117,
+        "event": "closed",
+        "actor": {
+          "login": "siddhi-k",
+          "type": "User"
+        },
+        "created_at": "2026-10-17T13:00:00Z"
+      }
+    ]
+  },
+  {
+    "issue": {
+      "number": 6,
+      "title": "Database schema migration (orders, users)",
+      "body": "Move to Postgres schema v2 with proper foreign keys.",
+      "state": "open",
+      "state_reason": null,
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "siddhi-k",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "backend"
+        },
+        {
+          "name": "db"
+        }
+      ],
+      "milestone": {
+        "number": 4,
+        "title": "Sprint 4",
+        "due_on": "2026-11-05T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:20:00Z",
+      "updated_at": "2026-09-28T13:20:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/6"
+    },
+    "comments": [],
+    "events": []
+  },
+  {
+    "issue": {
+      "number": 7,
+      "title": "Push notifications for order ready",
+      "body": "Notify the user (FCM) when their order is ready for pickup.",
+      "state": "open",
+      "state_reason": null,
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "rohan-d",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "backend"
+        },
+        {
+          "name": "mobile"
+        }
+      ],
+      "milestone": {
+        "number": 3,
+        "title": "Sprint 3",
+        "due_on": "2026-10-24T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:22:00Z",
+      "updated_at": "2026-09-28T13:22:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/7"
+    },
+    "comments": [],
+    "events": []
+  },
+  {
+    "issue": {
+      "number": 8,
+      "title": "Admin dashboard for canteen staff",
+      "body": "Staff view to mark items unavailable and orders ready.",
+      "state": "open",
+      "state_reason": null,
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "aarav-m",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "frontend"
+        }
+      ],
+      "milestone": {
+        "number": 3,
+        "title": "Sprint 3",
+        "due_on": "2026-10-24T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:24:00Z",
+      "updated_at": "2026-09-28T13:24:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/8"
+    },
+    "comments": [],
+    "events": []
+  },
+  {
+    "issue": {
+      "number": 9,
+      "title": "CI pipeline (GitHub Actions)",
+      "body": "Lint + tests on every PR.",
+      "state": "closed",
+      "state_reason": "completed",
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "rohan-d",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "devops"
+        }
+      ],
+      "milestone": {
+        "number": 2,
+        "title": "Sprint 2",
+        "due_on": "2026-10-10T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:26:00Z",
+      "updated_at": "2026-10-11T14:45:00Z",
+      "closed_at": "2026-10-11T14:45:00Z",
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/9"
+    },
+    "comments": [],
+    "events": [
+      {
+        "id": 262948492902,
+        "event": "closed",
+        "actor": {
+          "login": "rohan-d",
+          "type": "User"
+        },
+        "created_at": "2026-10-11T14:45:00Z"
+      }
+    ]
+  },
+  {
+    "issue": {
+      "number": 10,
+      "title": "Cart & checkout UI",
+      "body": "Cart page, quantity edit, checkout button wired to payments.",
+      "state": "closed",
+      "state_reason": "completed",
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "aarav-m",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "frontend"
+        }
+      ],
+      "milestone": {
+        "number": 4,
+        "title": "Sprint 4",
+        "due_on": "2026-11-05T07:00:00Z",
+        "state": "open"
+      },
+      "created_at": "2026-09-28T13:28:00Z",
+      "updated_at": "2026-10-18T07:30:00Z",
+      "closed_at": "2026-10-18T07:30:00Z",
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/10"
+    },
+    "comments": [],
+    "events": [
+      {
+        "id": 602908426726,
+        "event": "closed",
+        "actor": {
+          "login": "siddhi-k",
+          "type": "User"
+        },
+        "created_at": "2026-10-18T07:30:00Z"
+      }
+    ]
+  },
+  {
+    "issue": {
+      "number": 11,
+      "title": "Load testing",
+      "body": "Simulate lunch-hour rush: 300 concurrent orders.",
+      "state": "open",
+      "state_reason": null,
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "rohan-d",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "devops"
+        }
+      ],
+      "milestone": null,
+      "created_at": "2026-09-28T13:30:00Z",
+      "updated_at": "2026-09-28T13:30:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/11"
+    },
+    "comments": [],
+    "events": []
+  },
+  {
+    "issue": {
+      "number": 12,
+      "title": "Project report & documentation",
+      "body": "Final report, architecture diagrams, user manual.",
+      "state": "open",
+      "state_reason": null,
+      "user": {
+        "login": "siddhi-k",
+        "type": "User"
+      },
+      "assignees": [
+        {
+          "login": "priya-s",
+          "type": "User"
+        }
+      ],
+      "labels": [
+        {
+          "name": "docs"
+        }
+      ],
+      "milestone": null,
+      "created_at": "2026-09-28T13:32:00Z",
+      "updated_at": "2026-09-28T13:32:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/campuseats/campuseats-app/issues/12"
+    },
+    "comments": [],
+    "events": []
+  }
+]
