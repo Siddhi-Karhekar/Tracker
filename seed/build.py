@@ -63,7 +63,7 @@ def gh_user(handle: str) -> dict:
 
 def write_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +371,7 @@ def build_labels_csv(path: Path) -> None:
 
 def main() -> None:
     (OUT).mkdir(parents=True, exist_ok=True)
-    (OUT / "team.toml").write_text(build_team(), encoding="utf-8")
+    (OUT / "team.toml").write_text(build_team(), encoding="utf-8", newline="\n")  # LF on every OS
     issues, pulls, commits = build_github()
     write_json(OUT / "github" / "issues.json", issues)
     write_json(OUT / "github" / "pulls.json", pulls)

@@ -66,7 +66,9 @@ def test_build_is_up_to_date(tmp_path, monkeypatch):
     for f in tmp_path.rglob("*"):
         if f.is_file():
             rel = f.relative_to(tmp_path)
-            assert (DEMO / rel).read_bytes() == f.read_bytes(), f"{rel} is stale"
+            # compare ignoring line endings: Git on Windows may check files out with CRLF
+            want = (DEMO / rel).read_bytes().replace(b"\r\n", b"\n")
+            assert want == f.read_bytes().replace(b"\r\n", b"\n"), f"{rel} is stale"
 
 
 # ---------------------------------------------------------------- ingestion

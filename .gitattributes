@@ -1,0 +1,3 @@
+# Keep LF everywhere so generated demo files match on Windows, Mac and Linux
+* text=auto eol=lf
+*.db binary
