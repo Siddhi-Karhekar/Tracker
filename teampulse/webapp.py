@@ -39,16 +39,20 @@ def ensure_demo(path: str) -> bool:
     from teampulse.seed_demo import seed
 
     if Path(path).exists():
-        row = db.connect(path).execute("SELECT value FROM sync_state WHERE key = 'demo:seeded_at'").fetchone()
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect(path)) as conn:   # closed straight away: Windows can't reset an open file
+            try:
+                row = conn.execute("SELECT value FROM sync_state WHERE key = 'demo:seeded_at'").fetchone()
+            except sqlite3.OperationalError:
+                row = None
         if row and (datetime.now(timezone.utc) - datetime.fromisoformat(row[0])).total_seconds() < RESEED_HOURS * 3600:
             return False
-    for p in Path(path).parent.glob(Path(path).stem + "*"):   # db, wal files, chroma folder
-        if p.is_file():
-            p.unlink()
-        else:
-            import shutil
+    import shutil
+    for p in Path(path).parent.glob(Path(path).stem + "*"):   # the search index folder is rebuilt
+        if p.is_dir():
             shutil.rmtree(p, ignore_errors=True)
-    seed(path)
+    seed(path)   # empties the database in place and fills it again
     db.set_state(db.connect(path), "demo:seeded_at", datetime.now(timezone.utc).isoformat())
     return True
 

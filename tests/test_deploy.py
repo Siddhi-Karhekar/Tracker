@@ -91,3 +91,23 @@ def test_streamlit_secrets_fallback(tmp_path, monkeypatch):
     assert config.get("GROQ_TEST_KEY") == "from-secrets"
     monkeypatch.setenv("GROQ_TEST_KEY", "from-env")
     assert config.get("GROQ_TEST_KEY") == "from-env"                           # environment wins
+
+
+def test_demo_resets_while_the_app_has_the_database_open(tmp_path):
+    """Regression (Windows): the reset deleted the file, which fails while a connection has it open."""
+    import sqlite3
+    path = str(tmp_path / "demo.db")
+    ensure_demo(path)
+    holder = sqlite3.connect(path)                 # the running app's connection
+    holder.execute("SELECT COUNT(*) FROM events").fetchone()
+    conn = db.connect(path)
+    db.set_state(conn, "demo:seeded_at", (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat())
+    conn.execute("INSERT INTO labels VALUES ('x', 'noise', 'visitor', 'now')")
+    conn.commit()
+    from pathlib import Path
+    inode = Path(path).stat().st_ino
+    assert ensure_demo(path) is True
+    assert Path(path).stat().st_ino == inode       # same file, emptied in place, never deleted
+    assert holder.execute("SELECT COUNT(*) FROM labels WHERE labeller='visitor'").fetchone()[0] == 0
+    assert holder.execute("SELECT COUNT(*) FROM events").fetchone()[0] > 0
+    holder.close()

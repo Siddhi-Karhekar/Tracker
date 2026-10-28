@@ -247,7 +247,7 @@ def build() -> tuple[list[Event], dict]:
 
 def seed(path: str) -> tuple[int, Path]:
     if Path(path).exists():
-        Path(path).unlink()   # demo data is always rebuilt fresh
+        db.wipe(path)   # demo data is always rebuilt fresh (emptied in place: works with the file open)
     conn = db.connect(path)
     events, key = build()
     count = db.upsert_events(conn, events)

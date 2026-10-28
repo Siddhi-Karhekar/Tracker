@@ -58,7 +58,7 @@ def _raw(path: str) -> sqlite3.Connection:
 
 def verify(path: str) -> dict:
     """Open a database file read-only and check it. Raises ValueError if it is damaged."""
-    conn = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True)
+    conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)   # also correct on Windows
     try:
         result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if result != "ok":

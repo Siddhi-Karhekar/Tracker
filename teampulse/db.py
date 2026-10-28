@@ -283,6 +283,21 @@ class ThreadConnection:
         return self._conn().__exit__(*exc)
 
 
+def wipe(path: str) -> None:
+    """Empty a database file in place (drop every table). Unlike deleting the file, this works while other
+    connections have it open, which Windows doesn't allow; those connections simply see the new contents."""
+    conn = sqlite3.connect(path, timeout=BUSY_SECONDS)
+    try:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' "
+                                             "AND name NOT LIKE 'sqlite_%'")]
+        with conn:
+            for table in tables:
+                conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+    finally:
+        conn.close()
+
+
 def connect(path: str | None = None) -> sqlite3.Connection:
     path = path or config.DB_PATH
     if path == ":memory:":   # a private in-memory database (tests, evaluation): one connection is the database
