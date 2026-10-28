@@ -100,6 +100,7 @@ Existing data is untouched.
 | Final tests | same | **138 passed**, 0 failed, 0 skipped, 80% coverage, 0 unclosed-connection warnings (was 268) |
 | Clean install | new venv, `pip install -r requirements.lock`, pytest | 138 passed on Python 3.13 and on 3.12 (after TP-24) |
 | Regressions fail without the fix | TP-01, 02, 03, 05: tests run before fixing (03 by switching the gate off) | All failed, then passed |
+| GitHub Actions CI | `.github/workflows/ci.yml` on push | First run failed at install (TP-24). After the fix: **passed on Python 3.12 and 3.13** (install, lint, 138 tests, dependency scan) |
 | Lint (CI rules) | `ruff check --select F,E9,B,S …` | Passed |
 | Static security | `bandit -r teampulse views app.py` | 10 findings, all reviewed false positives (section B) |
 | Dependencies | `pip-audit -r requirements.lock` (482 packages incl. transitive) | 5 advisories, all ChromaDB 1.5.9 HTTP-server issues, no fixed version; not reachable (embedded use) |
