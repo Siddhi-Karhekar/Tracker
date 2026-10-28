@@ -133,6 +133,11 @@ edits, with who and when. Passwords and message text are never logged.
 - `tests/test_privacy.py`: opting out of Discord deletes the person's messages and every copy derived from them.
 - `tests/test_llm_safety.py`: AI calls are capped and warned about injected instructions; AI text can't carry
   disguised links or images.
+- `tests/test_guardrails.py`: a scripted AI breaks one rule at a time (invented links, contact details, keys,
+  leaked instructions, made-up references, judgemental or withheld contribution reports, a prompt-injected chat
+  message) through the real agents; each is caught, and good answers pass untouched.
+- `tests/test_langsmith_eval.py`: evaluation runs without a LangSmith key make no network calls (LangSmith
+  otherwise uploads traces, which contain team chat, even with uploads switched off).
 
 ## Reporting a problem
 

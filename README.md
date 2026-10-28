@@ -34,6 +34,7 @@ teampulse/
   auth.py                  accounts, salted password hashes, sessions, roles and permissions; CLI
   actions.py               the only way pages change data: checks the role on the server first
   maintenance.py           retention purge, verified backups and restore
+  guardrails.py            checks every agent's answer before it's shown (see Testing that each agent is correct)
   http.py                  retrying HTTP sessions for the GitHub and Notion pollers
   cli.py                   stats / recent / members / link
   signals.py               chat scanner: conversation windows → classify → link to tasks
@@ -60,6 +61,9 @@ teampulse/
   eval/linking.py          chat→task linking accuracy: refs vs similarity vs LLM
   eval/discrepancies.py    recall/precision vs planted conflicts, or precision from your verdicts
   eval/qa.py               plain RAG vs single agent vs multi-agent on the demo questions
+  eval/agents.py           per-agent correctness + guardrail evaluation with thresholds
+  eval/ragas_score.py      RAGAS scores with a free AI judge (own environment: requirements-eval.txt)
+  eval/langsmith_eval.py   golden questions as a LangSmith dataset and experiments
   eval/run_all.py          every evaluation in one report
   ingest/
     discord_bot.py         live capture + backfill + consent commands
@@ -283,6 +287,57 @@ quick tunnel (`cloudflared tunnel --url http://localhost:8501`) gives a temporar
 **Lighter install everywhere:** the default search model now runs through FastEmbed (ONNX, ~0.2 GB, no PyTorch),
 so `pip install -r requirements.txt` is a few hundred MB instead of ~2 GB. The heavier e5 model is still
 available (see `.env.example`). Switching models rebuilds the search index automatically.
+
+## Testing that each agent is correct, and guardrails
+
+**Guardrails** (`teampulse/guardrails.py`) check every agent's answer on the server before anyone sees it, and
+again after the Supervisor combines answers. They never ask the AI to judge itself.
+
+| Guardrail | Agents | What happens |
+|---|---|---|
+| secret_leak, invented_link, invented_contact, too_long | all | removed from the answer |
+| prompt_leak (answer repeats TeamPulse's instructions) | all | answer replaced |
+| ungrounded_reference (#issue, %, date or amount not in any source) | retrieval, blockers, conflicts, contributions, combined | warning shown |
+| uncited_blocker | blockers | warning shown |
+| one_sided_conflict (fewer than two sources cited) | conflicts | warning shown |
+| judgemental_language (ranking, blaming, "lied", "kaamchor"…) | contributions, combined | answer replaced by the rule-based report |
+| withheld_member (work of someone who hasn't opted in or approved) | contributions, combined | answer replaced |
+
+"Replaced" means the answer built directly from the data (the same one shown when the AI is unavailable).
+
+**Per-agent evaluation**: each agent tested on its own job against the demo team's answer key:
+
+```bash
+python -m teampulse.eval.agents --offline --check   # no AI; CI runs this on every push
+python -m teampulse.eval.agents                     # with your AI key: the real system
+```
+
+It reports router accuracy, retrieval context recall, chat-label F1 and blocker detection, linking accuracy,
+conflict recall/precision, contribution checks (claim verdicts, withheld reports, neutral wording), memory,
+Verifier accuracy, guardrail catch rate and false alarms, and the end-to-end pass rate, each against a threshold
+in `eval_data/agent_thresholds.json` (offline: regression floors; online: targets). The guardrail part runs a
+set of attacks, from invented links to judgemental summaries, through the real agents.
+
+**RAGAS** (faithfulness, context precision, context recall, factual correctness, with a free AI as the judge).
+RAGAS needs older packages than TeamPulse, so it gets its own environment and scores the file the agent
+evaluation writes:
+
+```bash
+python -m venv .venv-eval && .venv-eval/bin/pip install -r requirements-eval.txt
+.venv-eval/bin/python -m teampulse.eval.ragas_score data/eval/agents-<time>-ragas.jsonl --judge groq
+```
+
+**LangSmith** (free Developer plan: 1 seat, 5,000 traces a month, 14-day retention). Add
+`LANGSMITH_API_KEY` to `.env`, then:
+
+```bash
+python -m teampulse.eval.langsmith_eval          # golden questions as a dataset, this run as an experiment
+python -m teampulse.eval.agents --langsmith      # same, with the per-agent metrics attached
+```
+
+To see live traces of every question (Supervisor graph, specialists, AI calls), also set
+`LANGSMITH_TRACING=true`. Traces contain the team's chat and issue text, so use this with the demo team or only
+if your team agrees. With no key set, nothing is sent; local test runs are checked to make no network calls.
 
 ## Evaluation (Week 9)
 

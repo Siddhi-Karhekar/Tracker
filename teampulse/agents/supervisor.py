@@ -27,7 +27,7 @@ from teampulse.agents.blockers import BlockerAgent
 from teampulse.agents.contributions import ContributionAgent
 from teampulse.agents.discrepancy import DiscrepancyAgent
 from teampulse.agents.retrieval import CITATION, RetrievalAgent, format_evidence, verify_citations
-from teampulse import config, memory, verifier
+from teampulse import config, guardrails, memory, verifier
 from teampulse.llm import LLM, extract_json
 
 MAX_PARTS = 3
@@ -77,6 +77,7 @@ class SupervisorState(TypedDict, total=False):
     trace: list[dict]
     memories: list[dict]         # remembered facts relevant to the question, each checked against live data
     verification: dict           # Verifier result: per-statement verdicts + faithfulness
+    guardrails: list[dict]       # every guardrail that fired: {agent, guard, action, detail}
     allow_memory_write: bool     # False for read-only users: memory commands are refused, whoever routed them
     allowed_specialists: list | None   # None = all. Specialists behind pages the person can't open are refused.
 
@@ -86,9 +87,10 @@ def _step(state, name: str, started: float, **detail) -> list[dict]:
 
 
 FALLBACK_ROUTES = [   # used only when the AI router is unavailable (e.g. free quota used up)
-    ("contributions", r"\b(what|kya) (did|has|have) \w+ (do|done|did|work)|contribut|\bhelped\b|really (finish|complete)|\d+\s*%"),
+    ("contributions", r"\b(what|kya) (did|has|have) \w+ (do|done|did|work)|contribut|\bhelped\b|really (finish|complete)|\d+\s*%"
+                      r"|\bne (is hafte |aaj |kal |abhi tak )?kya kiya"),
     ("discrepancies", r"disagree|\bsync\b|up to date|outdated|mismatch|conflict|really (doing|working)|actually (doing|working)"),
-    ("blockers", r"block|stuck|\batak|\batka|waiting|(code|pr) review|re-?review|needs? (a )?review|help|decid|decision|kya scene"),
+    ("blockers", r"block|stuck|\bat[a]?k\w*|waiting|(code|pr) review|re-?review|needs? (a )?review|help|decid|decision|kya scene"),
 ]
 
 
@@ -233,6 +235,7 @@ class SupervisorAgent:
                           "trace": [{"step": "memory_write_refused", "ms": 0}]}
             else:
                 result = self.specialists[part["specialist"]].run(part["question"])
+                result = guardrails.apply(part["specialist"], result, part["question"])   # checked before use
             results.append({**part, "result": result})
             trace = trace + [{"step": f"specialist:{part['specialist']}", "question": part["question"],
                               "ms": int((time.time() - started) * 1000), "trace": result.get("trace", [])}]
@@ -241,7 +244,8 @@ class SupervisorAgent:
     def single(self, state: SupervisorState) -> SupervisorState:
         res = state["results"][0]["result"]
         return {"answer": res.get("answer", ""), "evidence": res.get("evidence", []), "cited": res.get("cited", []),
-                "warnings": list(res.get("warnings", [])), "provider": res.get("provider", "")}
+                "warnings": list(res.get("warnings", [])), "provider": res.get("provider", ""),
+                "guardrails": [{**g, "agent": state["results"][0]["specialist"]} for g in res.get("guardrails", [])]}
 
     def synthesize(self, state: SupervisorState) -> SupervisorState:
         started = time.time()
@@ -260,8 +264,18 @@ class SupervisorAgent:
             text, provider = partials, f"error ({type(exc).__name__})"
         text, cited, invalid, warnings = verify_citations(text, shown, provider)
         sub_warnings = [w for part in state["results"] for w in part["result"].get("warnings", [])]
+        sub_guards = [{**g, "agent": part["specialist"]} for part in state["results"]
+                      for g in part["result"].get("guardrails", [])]
+        checked = guardrails.apply("supervisor", {
+            "answer": text, "evidence": evidence, "cited": cited, "provider": provider, "warnings": [],
+            "fallback_answer": partials,   # the specialists' own (already checked) answers
+            "grounding": "\n".join(part["result"].get("grounding") or "" for part in state["results"]),
+            "withheld": sorted({n for part in state["results"] for n in part["result"].get("withheld") or []}),
+        }, state["question"])
+        text, cited, provider = checked["answer"], checked["cited"], checked["provider"]
         return {"answer": text, "evidence": evidence, "cited": cited, "provider": provider,
-                "warnings": sub_warnings + warnings,
+                "guardrails": sub_guards + [{**g, "agent": "supervisor"} for g in checked["guardrails"]],
+                "warnings": sub_warnings + warnings + checked["warnings"],
                 "trace": _step(state, "synthesize", started, provider=provider, parts=len(answers),
                                evidence_merged=len(evidence), cited=cited, invalid=invalid)}
 

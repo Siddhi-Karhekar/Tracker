@@ -7,6 +7,7 @@ Every step is recorded in `trace`, which the Streamlit app shows and Week 4's Su
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 import sys
@@ -101,6 +102,7 @@ def format_evidence(evidence: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
+log = logging.getLogger("teampulse.retrieval")
 CITATION = re.compile(r"\[(\d+)\]")
 
 
@@ -219,7 +221,8 @@ class RetrievalAgent:
             reply = self.llm.chat(messages)
             text, provider = reply.text.strip(), reply.provider + (" (cached)" if reply.cached else "")
         except Exception as exc:
-            text, provider = f"The language model is unavailable right now ({exc}). Evidence is listed below.", "error"
+            log.warning("Answering failed: %s", exc)   # details for the server log, not for the reader
+            text, provider = "The AI is unavailable right now, so here are the sources an answer would use.", "error"
         return {"answer": text, "provider": provider,
                 "trace": _step(state, "answer", started, provider=provider)}
 

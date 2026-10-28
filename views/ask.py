@@ -64,6 +64,9 @@ def render_result(result: dict):
     st.markdown(linkify(result["answer"], evidence))
     for warning in result.get("warnings", []):
         st.warning(ui.md_safe(warning))
+    repaired = sorted({g["guard"].replace("_", " ") for g in result.get("guardrails", []) if g["action"] == "repair"})
+    if repaired:
+        st.caption("Safety checks removed part of this answer: " + ", ".join(repaired) + ".")
     notes = []
     check = result.get("verification") or {}
     if check.get("statements"):

@@ -1,0 +1,35 @@
+{
+  "router": [
+    {"question": "Aman ne is hafte kya kiya?", "specialists": ["contributions"]},
+    {"question": "kis cheez pe atke hain hum?", "specialists": ["blockers"]},
+    {"question": "notion board outdated hai kya?", "specialists": ["discrepancies"]},
+    {"question": "remember that our demo day is on 2 Dec", "specialists": ["memory"]},
+    {"question": "what do you remember about the project?", "specialists": ["memory"]},
+    {"question": "Who reviewed the menu API pull request?", "specialists": ["retrieval"]},
+    {"question": "Is Riya waiting for help on anything?", "specialists": ["blockers", "retrieval"]},
+    {"question": "Did Aman really do the payment work?", "specialists": ["contributions", "discrepancies", "retrieval"]}
+  ],
+  "memory": [
+    {"step": "remember", "text": "remember that our demo day is on 2 Dec", "expect_active_contains": "2 Dec"},
+    {"step": "recall", "text": "what do you remember?", "expect_answer_contains": "2 Dec"},
+    {"step": "remember", "text": "remember that the demo day moved to 5 Dec", "expect_active_contains": "5 Dec",
+     "expect_active_not_contains": "2 Dec"},
+    {"step": "forget", "text": "forget the demo day", "expect_active_not_contains": "Dec"},
+    {"step": "member_write", "text": "remember that we use MongoDB now", "expect_answer_contains": "Only the team leader",
+     "expect_active_not_contains": "MongoDB"}
+  ],
+  "verifier": [
+    {"evidence": "github:campuseats/app#15", "statement": "Aman's pull request added the menu endpoints and tests [1].", "supported": true},
+    {"evidence": "github:campuseats/app#15", "statement": "The payment webhook was finished and deployed to production [1].", "supported": false},
+    {"evidence": "discord:900006", "statement": "The team decided to use Postgres instead of Firebase [1].", "supported": true},
+    {"evidence": "discord:900006", "statement": "The team decided to stay on Firebase and drop Render [1].", "supported": false},
+    {"evidence": "discord:900004", "statement": "Kabir has not received past order data from the canteen [1].", "supported": true},
+    {"evidence": "discord:900004", "statement": "Kabir finished training the recommendation model on canteen data [1].", "supported": false},
+    {"evidence": "github:comment:5001", "statement": "OTP mails are going to spam and Aman is trying SPF and DKIM [1].", "supported": true},
+    {"evidence": "github:comment:5001", "statement": "The OTP problem was fixed by switching to SMS [1].", "supported": false}
+  ],
+  "contribution_claims": [
+    {"member": "Neha", "event": "discord:900009", "expect": "supported"},
+    {"member": "Kabir", "event": "discord:900010", "expect": "weak"}
+  ]
+}

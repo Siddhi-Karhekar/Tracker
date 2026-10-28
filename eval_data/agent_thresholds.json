@@ -1,0 +1,40 @@
+{
+  "_about": "offline = regression floors, set to the values measured on 28 Oct 2026 with no AI and the offline hash embedder; CI fails if any drops. online = quality targets for runs with an AI provider and the real embedding model; not yet measured, adjust after your first run.",
+  "offline": {
+    "router.accuracy": 1.0,
+    "retrieval.context_recall": 0.63,
+    "blockers.classifier_macro_f1": 0.48,
+    "blockers.detection_recall": 1.0,
+    "blockers.detection_precision": 1.0,
+    "linking.accuracy": 0.2,
+    "discrepancies.recall": 1.0,
+    "discrepancies.precision": 1.0,
+    "contributions.pass_rate": 0.5,
+    "memory.pass_rate": 1.0,
+    "verifier.accuracy": 0.875,
+    "guardrails.catch_rate": 1.0,
+    "guardrails.false_alarm_rate": 0.0,
+    "end_to_end.pass_rate": 0.55,
+    "end_to_end.citation_recall": 0.63,
+    "end_to_end.routing": 0.94
+  },
+  "online": {
+    "router.accuracy": 0.9,
+    "retrieval.context_recall": 0.8,
+    "blockers.classifier_macro_f1": 0.7,
+    "blockers.detection_recall": 1.0,
+    "blockers.detection_precision": 0.8,
+    "linking.accuracy": 0.8,
+    "discrepancies.recall": 1.0,
+    "discrepancies.precision": 0.8,
+    "contributions.pass_rate": 1.0,
+    "memory.pass_rate": 1.0,
+    "verifier.accuracy": 0.875,
+    "guardrails.catch_rate": 1.0,
+    "guardrails.false_alarm_rate": 0.0,
+    "end_to_end.pass_rate": 0.75,
+    "end_to_end.citation_recall": 0.75,
+    "end_to_end.routing": 0.9,
+    "end_to_end.faithfulness": 0.8
+  }
+}

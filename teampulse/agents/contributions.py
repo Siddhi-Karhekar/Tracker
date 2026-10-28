@@ -53,6 +53,9 @@ class ContributionAgent:
         days = window_days(question)
         days = 14 if days == 21 else days       # 21 is the "nothing said" default
         notes, reports = [], []
+        # Everyone whose report isn't shared, whether or not the question names them: the guardrails block an
+        # answer that mentions any of them.
+        withheld = [m.name for m in everyone if not (m.consent and contrib.visible_to_team(self.conn, m))]
         for m in chosen:
             if not m.consent:
                 notes.append(f"{m.name} hasn't opted in, so there's no report for them.")
@@ -101,6 +104,7 @@ class ContributionAgent:
 
         started = time.time()
         warnings = [n for n in notes]
+        template = "\n\n".join(f.replace("## ", "**", 1).replace(")\n", ")**\n", 1) for f in facts)
         try:
             reply = self.llm.chat([
                 {"role": "system", "content": ANSWER_PROMPT},
@@ -108,13 +112,15 @@ class ContributionAgent:
                                             + f"\n\nQuestion: {question}"}])
             text, provider = reply.text.strip(), reply.provider + (" (cached)" if reply.cached else "")
         except Exception as exc:
-            text, provider = "\n\n".join(f.replace("## ", "**", 1).replace(")\n", ")**\n", 1) for f in facts), "template"
+            text, provider = template, "template"
             warnings.append(f"Language model unavailable ({type(exc).__name__}); showing the evidence directly.")
         text, cited, invalid, extra = verify_citations(text, len(evidence), provider)
         trace.append({"step": "answer", "ms": int((time.time() - started) * 1000), "provider": provider,
                       "cited": cited, "invalid": invalid})
         return {"answer": text, "evidence": evidence, "cited": cited, "warnings": warnings + extra,
-                "provider": provider, "trace": trace}
+                "provider": provider, "trace": trace,
+                # for the guardrails: rule-based answer, the facts the AI was given, and who must not appear
+                "fallback_answer": template, "grounding": "\n\n".join(facts), "withheld": withheld}
 
 
 def main():

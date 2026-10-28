@@ -113,6 +113,8 @@ class LLM:
                 return None
         # Bounded: 2 retries with backoff (429s, 5xx), 45 s per attempt, then the next provider is tried.
         client = OpenAI(base_url=base_url, api_key=api_key, max_retries=2, timeout=45)
+        from teampulse import tracing
+        client = tracing.langsmith_wrap(client)   # no-op unless LangSmith tracing is switched on
         self._clients[name] = (client, config.get(model_env, default_model))
         return self._clients[name]
 

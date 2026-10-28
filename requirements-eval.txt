@@ -1,0 +1,6 @@
+# Optional: RAGAS scoring, in its own environment (it needs older LangChain/OpenAI packages than TeamPulse).
+#   python -m venv .venv-eval && .venv-eval/bin/pip install -r requirements-eval.txt
+# Tested 28 Oct 2026. ragas 0.4.3 imports a module that langchain-community 0.4 removed, hence the pin.
+ragas==0.4.3
+langchain-community>=0.3.29,<0.4
+openai>=1.40,<2

@@ -180,8 +180,11 @@ class BlockerAgent:
         text, cited, invalid, extra = verify_citations(text, len(data["evidence"]), provider)
         trace.append({"step": "answer", "ms": int((time.time() - started) * 1000), "provider": provider,
                       "cited": cited, "invalid": invalid})
+        fallback = self.template_answer(data)
         return {"answer": text, "evidence": data["evidence"], "cited": cited, "warnings": warnings + extra,
-                "provider": provider, "trace": trace}
+                "provider": provider, "trace": trace,
+                # for the guardrails: what a blocked answer is replaced with, and the data the AI was given
+                "fallback_answer": fallback, "grounding": facts + "\n" + fallback}
 
 
 def main():

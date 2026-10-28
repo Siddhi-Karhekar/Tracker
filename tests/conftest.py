@@ -2,6 +2,9 @@
 tests/test_auth.py and tests/test_roles_ui.py switch it on to test both roles."""
 import pytest
 
+# tests/eval_env/ runs only in the separate RAGAS environment (requirements-eval.txt); see CI.
+collect_ignore_glob = ["eval_env/*"]
+
 
 @pytest.fixture(autouse=True)
 def _auth_off_by_default(monkeypatch):

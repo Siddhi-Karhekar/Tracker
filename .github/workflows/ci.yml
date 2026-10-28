@@ -41,3 +41,18 @@ jobs:
           pip-audit -r requirements.lock
           --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3813
           --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815
+
+  ragas-wiring:
+    # RAGAS needs older LangChain/OpenAI than the app, so it gets its own environment (requirements-eval.txt).
+    # This checks the scorer drives the real RAGAS metrics; real scores need a judge key (see README).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-eval.txt pytest python-dotenv
+      - run: python -m pytest -q --noconftest tests/eval_env

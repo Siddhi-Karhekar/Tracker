@@ -128,7 +128,8 @@ class DiscrepancyAgent:
         trace.append({"step": "answer", "ms": int((time.time() - started) * 1000), "provider": provider,
                       "cited": cited, "invalid": invalid})
         return {"answer": text, "evidence": evidence, "cited": cited, "warnings": warnings + extra,
-                "provider": provider, "trace": trace}
+                "provider": provider, "trace": trace,
+                "fallback_answer": self.template(items), "grounding": facts}   # used by the guardrails
 
     @staticmethod
     def template(items: list[dict]) -> str:
