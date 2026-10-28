@@ -1,194 +1,198 @@
-"""TeamPulse Discord bot: live listening + history backfill → SQLite.
+"""Discord bot: captures messages live, catches up on missed history, and respects consent.
 
-    python -m teampulse.ingest.discord_bot
+Run:  python -m teampulse.ingest.discord_bot
 
-Setup (Developer Portal → your app → Bot):
-  * turn on MESSAGE CONTENT INTENT (privileged, but no verification needed under 100 servers)
-  * invite with scopes `bot` and permissions: View Channels + Read Message History (+ Send Messages for replies)
-
-Behaviour
-  * on start: for each allowed channel (and its active threads), fetch everything after the
-    last stored message id, so nothing is missed while the bot was offline
-  * on message / edit / delete: store, update, or remove
-  * commands (any channel it reads):
-        !teampulse status   what the bot stores and for whom
-        !teampulse optout   stop storing my messages and delete the ones already stored
-        !teampulse optin    start storing my messages again
+Privacy by design:
+  * Only one server (DISCORD_GUILD_ID) is read.
+  * Messages are stored only for members who typed `!teampulse join`, and only from that point on.
+  * `!teampulse leave` opts out and deletes everything stored for that member.
+  * Edits and deletes in Discord are mirrored into the database.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-import sys
+from datetime import datetime, timedelta, timezone
 
 import discord
 
-from teampulse import db
-from teampulse.config import env, load_team
-from teampulse.ingest import discord_ingest
+from teampulse import config, db
+from teampulse.models import Event, issue_refs, to_iso
 
 log = logging.getLogger("teampulse.discord")
 
+PREFIX = "!teampulse"
+HELP_TEXT = (
+    "**TeamPulse bot** reads this server to track project progress and blockers.\n"
+    "`!teampulse join` – allow TeamPulse to store your messages from now on\n"
+    "`!teampulse leave` – stop, and delete everything stored from you\n"
+    "`!teampulse status` – see how many of your messages are stored\n"
+    "Nothing is stored for members who have not joined."
+)
 
-ACCEPT_WEBHOOKS = (env("DISCORD_ACCEPT_WEBHOOKS", "0") or "0") == "1"  # for the seeded demo server
+
+# ---- pure mapping (unit-tested without Discord) ------------------------------------------
+
+def channel_label(channel) -> str:
+    parent = getattr(channel, "parent", None)
+    name = getattr(channel, "name", None) or str(channel.id)
+    return f"{parent.name}/{name}" if parent is not None else name
 
 
-def to_export_dict(m: discord.Message) -> dict:
-    """discord.py Message → DiscordChatExporter-shaped dict (what discord_ingest expects)."""
-    is_bot = m.author.bot and not (ACCEPT_WEBHOOKS and m.webhook_id)
-    kind = {discord.MessageType.default: "Default", discord.MessageType.reply: "Reply",
-            discord.MessageType.thread_starter_message: "ThreadStarterMessage"}.get(m.type, str(m.type))
-    out = {
-        "id": str(m.id),
-        "type": kind,
-        "timestamp": m.created_at.isoformat(),
-        "timestampEdited": m.edited_at.isoformat() if m.edited_at else None,
-        "content": m.content,
-        "author": {"id": None if m.webhook_id else str(m.author.id), "name": m.author.name, "isBot": is_bot,
-                   "nickname": getattr(m.author, "display_name", m.author.name)},
-        "mentions": [{"id": str(u.id), "name": u.name} for u in m.mentions],
-        "attachments": [{"fileName": a.filename, "url": a.url} for a in m.attachments],
-    }
-    if m.reference and m.reference.message_id:
-        out["reference"] = {"messageId": str(m.reference.message_id)}
-    return out
+def message_to_event(message) -> Event:
+    channel = message.channel
+    parent = getattr(channel, "parent", None)
+    reference = getattr(message, "reference", None)
+    reply_to = f"discord:{reference.message_id}" if reference and reference.message_id else None
+    text = message.clean_content
+    return Event(
+        source="discord",
+        kind="message",
+        native_id=str(message.id),
+        author=str(message.author.id),
+        author_name=message.author.display_name,
+        body=text,
+        url=message.jump_url,
+        channel=channel_label(channel),
+        parent_id=reply_to,
+        created_at=to_iso(message.created_at),
+        updated_at=to_iso(message.edited_at or message.created_at),
+        extra={
+            "channel_id": str(parent.id if parent is not None else channel.id),
+            "thread_id": str(channel.id) if parent is not None else None,
+            "attachments": len(getattr(message, "attachments", []) or []),
+            "issue_refs": issue_refs(text),
+        },
+    )
 
+
+def cursor_key(channel_id: int) -> str:
+    return f"discord:channel:{channel_id}"
+
+
+# ---- bot -----------------------------------------------------------------------------------
 
 class TeamPulseBot(discord.Client):
-    def __init__(self, guild_id: int, channels: set[str]):
+    def __init__(self, guild_id: int, backfill_days: int):
         intents = discord.Intents.default()
-        intents.message_content = True
+        intents.message_content = True      # must also be switched on in the Developer Portal
         super().__init__(intents=intents)
         self.guild_id = guild_id
-        self.channel_names = channels
-        self.team = load_team()
+        self.backfill_days = backfill_days
         self.conn = db.connect()
-        db.sync_members(self.conn, self.team)
-        self.lock = asyncio.Lock()
+        self.consented = db.consented_discord_ids(self.conn)
 
-    # ---------------------------------------------------------------- helpers
-    def allowed(self, channel) -> bool:
-        if getattr(channel, "guild", None) is None or channel.guild.id != self.guild_id:
+    def _in_scope(self, guild) -> bool:
+        return guild is not None and guild.id == self.guild_id
+
+    def _store(self, message) -> bool:
+        if message.author.bot or message.content.startswith(PREFIX):
             return False
-        base = channel.parent if isinstance(channel, discord.Thread) else channel
-        return not self.channel_names or base.name in self.channel_names
+        if str(message.author.id) not in self.consented:
+            return False
+        db.upsert_events(self.conn, [message_to_event(message)])
+        return True
 
-    def channel_label(self, channel) -> tuple[str, str | None]:
-        if isinstance(channel, discord.Thread):
-            return channel.parent.name, channel.name
-        return channel.name, None
-
-    def store(self, m: discord.Message) -> bool:
-        name, thread = self.channel_label(m.channel)
-        return discord_ingest.ingest_message(
-            self.conn, self.team, to_export_dict(m), name, str(m.guild.id), str(m.channel.id),
-            skip=db.opted_out(self.conn), thread=thread)
-
-    # ---------------------------------------------------------------- backfill
-    async def backfill_channel(self, ch) -> int:
-        scope = str(ch.id)
-        cursor = db.get_cursor(self.conn, "discord", scope)
-        after = discord.Object(id=int(cursor)) if cursor else None
-        n, last = 0, cursor
-        try:
-            async for m in ch.history(limit=None, after=after, oldest_first=True):
-                async with self.lock:
-                    if self.store(m):
-                        n += 1
-                last = str(m.id)
-                if n and n % 200 == 0:
-                    self.conn.commit()
-        except discord.Forbidden:
-            log.warning("No permission to read history in #%s", ch.name)
-            return 0
-        if last:
-            db.set_cursor(self.conn, "discord", scope, last)
-        self.conn.commit()
-        return n
-
+    # -- startup catch-up --------------------------------------------------------------------
     async def on_ready(self):
+        log.info("Logged in as %s", self.user)
         guild = self.get_guild(self.guild_id)
         if guild is None:
-            log.error("Bot is not in guild %s. Invite it first.", self.guild_id)
-            await self.close()
+            log.error("Bot is not in server %s. Invite it first (see README).", self.guild_id)
             return
-        log.info("Connected as %s to %s; backfilling…", self.user, guild.name)
-        total = 0
-        for ch in guild.text_channels:
-            if self.allowed(ch):
-                total += await self.backfill_channel(ch)
-        for th in await guild.active_threads():
-            if self.allowed(th):
-                total += await self.backfill_channel(th)
-        linked = discord_ingest.link_hash_refs(self.conn)
-        log.info("Backfill done: %d new messages, %d linked by #refs. Listening live.", total, linked)
+        channels = list(guild.text_channels) + list(guild.threads)
+        for channel in channels:
+            await self.backfill(channel)
+        log.info("Backfill done. Listening live. %d member(s) have joined.", len(self.consented))
 
-    # ---------------------------------------------------------------- live events
-    async def on_message(self, m: discord.Message):
-        if (m.author.bot and not (ACCEPT_WEBHOOKS and m.webhook_id)) or not self.allowed(m.channel):
+    async def backfill(self, channel):
+        perms = channel.permissions_for(channel.guild.me)
+        if not (perms.read_messages and perms.read_message_history):
             return
-        if m.content.strip().lower().startswith("!teampulse"):
-            await self.command(m)
+        key = cursor_key(channel.id)
+        last_id = db.get_state(self.conn, key)
+        if last_id:
+            after = discord.Object(id=int(last_id))
+        else:
+            after = datetime.now(timezone.utc) - timedelta(days=self.backfill_days)
+        stored = seen = 0
+        newest = last_id
+        try:
+            async for message in channel.history(limit=None, after=after, oldest_first=True):
+                seen += 1
+                stored += self._store(message)
+                newest = str(message.id)
+        except discord.Forbidden:
+            log.warning("No access to #%s, skipping", channel_label(channel))
             return
-        async with self.lock:
-            if self.store(m):
-                db.set_cursor(self.conn, "discord", str(m.channel.id), str(m.id))
-                self.conn.commit()
+        if newest:
+            db.set_state(self.conn, key, newest)
+        if seen:
+            log.info("#%s: %d new message(s), %d stored", channel_label(channel), seen, stored)
 
-    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
-        ch = self.get_channel(payload.channel_id)
-        if ch is None or not self.allowed(ch):
+    # -- live events ---------------------------------------------------------------------------
+    async def on_message(self, message):
+        if not self._in_scope(message.guild) or message.author.bot:
+            return
+        if message.content.strip().lower().startswith(PREFIX):
+            await self.handle_command(message)
+        else:
+            self._store(message)
+        db.set_state(self.conn, cursor_key(message.channel.id), str(message.id))
+
+    async def on_raw_message_edit(self, payload):
+        if payload.guild_id != self.guild_id:
+            return
+        channel = self.get_channel(payload.channel_id)
+        if channel is None:
             return
         try:
-            m = await ch.fetch_message(payload.message_id)  # always fetch: the cached copy is pre-edit
+            message = await channel.fetch_message(payload.message_id)
         except (discord.NotFound, discord.Forbidden):
             return
-        async with self.lock:
-            self.store(m)
-            self.conn.commit()
+        self._store(message)
 
-    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
-        async with self.lock:
-            eid = f"discord:message:{payload.message_id}"
-            self.conn.execute("DELETE FROM claims WHERE source_ref=?", (eid,))
-            self.conn.execute("DELETE FROM events WHERE event_id=?", (eid,))
-            self.conn.commit()
+    async def on_raw_message_delete(self, payload):
+        if payload.guild_id == self.guild_id:
+            db.delete_event(self.conn, f"discord:{payload.message_id}")
 
-    # ---------------------------------------------------------------- commands
-    async def command(self, m: discord.Message):
-        parts = m.content.split()
-        cmd = parts[1].lower() if len(parts) > 1 else "status"
-        handle = self.team.from_discord(str(m.author.id), m.author.name)
-        known = self.team.get(handle) is not None
-        if cmd == "optout":
-            async with self.lock:
-                self.conn.execute("INSERT OR REPLACE INTO optouts VALUES (?, ?)", (handle, db.now_iso()))
-                removed = discord_ingest.purge_member(self.conn, handle)
-            await m.reply(f"Done. I won't store your messages, and I deleted {removed} I had stored.")
-        elif cmd == "optin":
-            async with self.lock:
-                self.conn.execute("DELETE FROM optouts WHERE handle=?", (handle,))
-                self.conn.commit()
-            await m.reply("You're opted in again. Messages from now on will be stored "
-                          "(earlier ones are not re-fetched).")
+    async def on_raw_bulk_message_delete(self, payload):
+        if payload.guild_id == self.guild_id:
+            for message_id in payload.message_ids:
+                db.delete_event(self.conn, f"discord:{message_id}")
+
+    # -- consent commands ----------------------------------------------------------------------
+    async def handle_command(self, message):
+        parts = message.content.strip().split()
+        command = parts[1].lower() if len(parts) > 1 else "help"
+        user_id = str(message.author.id)
+        name = message.author.display_name
+
+        if command == "join":
+            db.set_discord_consent(self.conn, user_id, name, True)
+            self.consented.add(user_id)
+            await message.reply(
+                f"Thanks {name}. TeamPulse will store your messages in this server from now on. "
+                "Type `!teampulse leave` any time to stop and delete them."
+            )
+        elif command == "leave":
+            db.set_discord_consent(self.conn, user_id, name, False)
+            self.consented.discard(user_id)
+            removed = db.delete_discord_messages_of(self.conn, user_id)
+            await message.reply(f"Done. You're opted out and {removed} stored message(s) were deleted.")
+        elif command == "status":
+            stored = db.count_events(self.conn, "discord", user_id)
+            state = "joined" if user_id in self.consented else "not joined"
+            await message.reply(f"You are **{state}**. Stored messages from you: {stored}.")
         else:
-            n = self.conn.execute("SELECT COUNT(*) FROM events WHERE source='discord'").fetchone()[0]
-            mine = self.conn.execute("SELECT COUNT(*) FROM events WHERE source='discord' AND author=?",
-                                     (handle,)).fetchone()[0]
-            status = "opted out" if handle in db.opted_out(self.conn) else "opted in"
-            note = "" if known else " (you're not in team.toml yet)"
-            await m.reply(f"TeamPulse reads only this project server and stores messages locally for the team "
-                          f"tracker. Stored: {n} messages, {mine} of yours. You are {status}{note}. "
-                          f"Commands: `!teampulse optout`, `!teampulse optin`.")
+            await message.reply(HELP_TEXT)
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    token, guild = env("DISCORD_BOT_TOKEN"), env("DISCORD_GUILD_ID")
-    if not token or not guild:
-        sys.exit("Set DISCORD_BOT_TOKEN and DISCORD_GUILD_ID in .env")
-    channels = {c.strip() for c in (env("DISCORD_CHANNELS", "") or "").split(",") if c.strip()}
-    TeamPulseBot(int(guild), channels).run(token, log_handler=None)
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    token = config.require("DISCORD_BOT_TOKEN")
+    guild_id = int(config.require("DISCORD_GUILD_ID"))
+    bot = TeamPulseBot(guild_id, config.get_int("DISCORD_BACKFILL_DAYS", 30))
+    bot.run(token, log_handler=None)
 
 
 if __name__ == "__main__":

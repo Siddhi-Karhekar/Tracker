@@ -1,0 +1,60 @@
+{"conversation": "c1", "channel": "backend", "id": "c1-1", "author": "Arjun", "minutes": 0, "reply_to": null, "text": "yaar mongo connect nahi ho raha, timeout aa raha hai har baar", "label": "blocker"}
+{"conversation": "c1", "channel": "backend", "id": "c1-2", "author": "Priya", "minutes": 3, "reply_to": "c1-1", "text": "IP whitelist kiya atlas pe?", "label": "help_request"}
+{"conversation": "c1", "channel": "backend", "id": "c1-3", "author": "Arjun", "minutes": 9, "reply_to": "c1-2", "text": "arre haan wahi tha, ab chal gaya 🙏", "label": "progress"}
+{"conversation": "c1", "channel": "backend", "id": "c1-4", "author": "Priya", "minutes": 10, "reply_to": null, "text": "👍", "label": "noise"}
+{"conversation": "c2", "channel": "frontend", "id": "c2-1", "author": "Sneha", "minutes": 0, "reply_to": null, "text": "dashboard ka UI push kar diya hai, charts abhi dummy data pe hai", "label": "progress"}
+{"conversation": "c2", "channel": "frontend", "id": "c2-2", "author": "Sneha", "minutes": 1, "reply_to": null, "text": "@Rohan API endpoint ka format bata de toh real data laga dungi", "label": "help_request"}
+{"conversation": "c2", "channel": "frontend", "id": "c2-3", "author": "Rohan", "minutes": 40, "reply_to": "c2-2", "text": "swagger doc share kar raha hu, /api/stats dekh", "label": "progress"}
+{"conversation": "c2", "channel": "frontend", "id": "c2-4", "author": "Sneha", "minutes": 42, "reply_to": "c2-3", "text": "thanks!!", "label": "noise"}
+{"conversation": "c3", "channel": "general", "id": "c3-1", "author": "Rohan", "minutes": 0, "reply_to": null, "text": "React Native ya Flutter? jaldi decide karo yaar", "label": "help_request"}
+{"conversation": "c3", "channel": "general", "id": "c3-2", "author": "Priya", "minutes": 5, "reply_to": "c3-1", "text": "flutter mujhe nahi aata honestly", "label": "noise"}
+{"conversation": "c3", "channel": "general", "id": "c3-3", "author": "Arjun", "minutes": 8, "reply_to": null, "text": "chalo React Native hi lete hai, sabko JS aati hai", "label": "decision"}
+{"conversation": "c3", "channel": "general", "id": "c3-4", "author": "Sneha", "minutes": 9, "reply_to": "c3-3", "text": "agreed", "label": "noise"}
+{"conversation": "c3", "channel": "general", "id": "c3-5", "author": "Rohan", "minutes": 11, "reply_to": null, "text": "ok toh final hai - RN + Expo. main repo setup kar deta hu", "label": "decision"}
+{"conversation": "c4", "channel": "ml", "id": "c4-1", "author": "Priya", "minutes": 0, "reply_to": null, "text": "model accuracy 62% pe atki hai, kitna bhi tune karo badh hi nahi rahi", "label": "blocker"}
+{"conversation": "c4", "channel": "ml", "id": "c4-2", "author": "Arjun", "minutes": 20, "reply_to": "c4-1", "text": "class imbalance hoga, SMOTE try kar", "label": "progress"}
+{"conversation": "c4", "channel": "ml", "id": "c4-3", "author": "Priya", "minutes": 25, "reply_to": "c4-2", "text": "kal try karti hu", "label": "progress"}
+{"conversation": "c4", "channel": "ml", "id": "c4-4", "author": "Priya", "minutes": 30, "reply_to": null, "text": "colab ka GPU quota bhi khatam ho gaya 😭", "label": "blocker"}
+{"conversation": "c5", "channel": "general", "id": "c5-1", "author": "Sneha", "minutes": 0, "reply_to": null, "text": "kal ka lecture cancel hai kya?", "label": "noise"}
+{"conversation": "c5", "channel": "general", "id": "c5-2", "author": "Rohan", "minutes": 2, "reply_to": "c5-1", "text": "pata nahi bro", "label": "noise"}
+{"conversation": "c5", "channel": "general", "id": "c5-3", "author": "Arjun", "minutes": 4, "reply_to": null, "text": "canteen chal raha koi?", "label": "noise"}
+{"conversation": "c5", "channel": "general", "id": "c5-4", "author": "Priya", "minutes": 5, "reply_to": "c5-3", "text": "😂 abhi nahi, deadline hai", "label": "noise"}
+{"conversation": "c6", "channel": "backend", "id": "c6-1", "author": "Rohan", "minutes": 0, "reply_to": null, "text": "JWT refresh token wala logic implement kar raha hu, kal tak PR daal dunga #23", "label": "progress"}
+{"conversation": "c6", "channel": "backend", "id": "c6-2", "author": "Rohan", "minutes": 300, "reply_to": null, "text": "PR #24 daal diya, koi review kar do please", "label": "help_request"}
+{"conversation": "c6", "channel": "backend", "id": "c6-3", "author": "Arjun", "minutes": 330, "reply_to": "c6-2", "text": "dekh raha hu", "label": "progress"}
+{"conversation": "c6", "channel": "backend", "id": "c6-4", "author": "Arjun", "minutes": 345, "reply_to": "c6-2", "text": "approved, merge kar de", "label": "progress"}
+{"conversation": "c7", "channel": "frontend", "id": "c7-1", "author": "Sneha", "minutes": 0, "reply_to": null, "text": "Expo build fail ho raha hai android pe, gradle error", "label": "blocker"}
+{"conversation": "c7", "channel": "frontend", "id": "c7-2", "author": "Sneha", "minutes": 2, "reply_to": null, "text": "error: Could not resolve com.facebook.react:react-native", "label": "blocker"}
+{"conversation": "c7", "channel": "frontend", "id": "c7-3", "author": "Rohan", "minutes": 15, "reply_to": "c7-1", "text": "node_modules delete karke dobara install kar", "label": "progress"}
+{"conversation": "c7", "channel": "frontend", "id": "c7-4", "author": "Sneha", "minutes": 50, "reply_to": "c7-3", "text": "nahi hua, same error", "label": "blocker"}
+{"conversation": "c8", "channel": "general", "id": "c8-1", "author": "Priya", "minutes": 0, "reply_to": null, "text": "guys ma'am ne bola presentation 15 tareekh ko hai, slides kaun banayega?", "label": "help_request"}
+{"conversation": "c8", "channel": "general", "id": "c8-2", "author": "Arjun", "minutes": 6, "reply_to": "c8-1", "text": "main bana leta hu, sab apna part ka 2-2 line bhej do", "label": "progress"}
+{"conversation": "c8", "channel": "general", "id": "c8-3", "author": "Sneha", "minutes": 8, "reply_to": null, "text": "frontend wala part main likh dungi", "label": "progress"}
+{"conversation": "c8", "channel": "general", "id": "c8-4", "author": "Rohan", "minutes": 9, "reply_to": null, "text": "theek hai", "label": "noise"}
+{"conversation": "c9", "channel": "backend", "id": "c9-1", "author": "Arjun", "minutes": 0, "reply_to": null, "text": "deployment pe koi problem nahi aayi, render pe live hai ab", "label": "progress"}
+{"conversation": "c9", "channel": "backend", "id": "c9-2", "author": "Priya", "minutes": 3, "reply_to": "c9-1", "text": "wah finally 🎉", "label": "noise"}
+{"conversation": "c9", "channel": "backend", "id": "c9-3", "author": "Arjun", "minutes": 5, "reply_to": null, "text": "free tier pe 15 min baad server so jata hai, pehli request slow hogi", "label": "blocker"}
+{"conversation": "c9", "channel": "backend", "id": "c9-4", "author": "Rohan", "minutes": 7, "reply_to": "c9-3", "text": "demo se pehle ek baar ping kar denge, chalega", "label": "decision"}
+{"conversation": "c10", "channel": "ml", "id": "c10-1", "author": "Priya", "minutes": 0, "reply_to": null, "text": "dataset ke liye professor ko mail kiya tha, abhi tak reply nahi aaya", "label": "blocker"}
+{"conversation": "c10", "channel": "ml", "id": "c10-2", "author": "Priya", "minutes": 2, "reply_to": null, "text": "@Arjun tu HOD se baat kar sakta hai kya iske baare me?", "label": "help_request"}
+{"conversation": "c10", "channel": "ml", "id": "c10-3", "author": "Arjun", "minutes": 90, "reply_to": "c10-2", "text": "haan kal milta hu unse", "label": "progress"}
+{"conversation": "c11", "channel": "frontend", "id": "c11-1", "author": "Rohan", "minutes": 0, "reply_to": null, "text": "dark mode add kar diya settings me", "label": "progress"}
+{"conversation": "c11", "channel": "frontend", "id": "c11-2", "author": "Sneha", "minutes": 4, "reply_to": "c11-1", "text": "nice bhai, par login screen pe text dikh hi nahi raha dark mode me", "label": "blocker"}
+{"conversation": "c11", "channel": "frontend", "id": "c11-3", "author": "Rohan", "minutes": 20, "reply_to": "c11-2", "text": "fixed, color variable galat tha", "label": "progress"}
+{"conversation": "c12", "channel": "general", "id": "c12-1", "author": "Sneha", "minutes": 0, "reply_to": null, "text": "Notion pe tasks update kar do sab, half cheezein abhi bhi 'In progress' dikh rahi hai jo done hai", "label": "help_request"}
+{"conversation": "c12", "channel": "general", "id": "c12-2", "author": "Arjun", "minutes": 10, "reply_to": "c12-1", "text": "haan sorry, abhi karta hu", "label": "noise"}
+{"conversation": "c12", "channel": "general", "id": "c12-3", "author": "Priya", "minutes": 12, "reply_to": null, "text": "We'll keep weekly sync on Saturday 11am from now on", "label": "decision"}
+{"conversation": "c13", "channel": "backend", "id": "c13-1", "author": "Rohan", "minutes": 0, "reply_to": null, "text": "payment webhook signature verify nahi ho raha, 401 de raha hai", "label": "blocker"}
+{"conversation": "c13", "channel": "backend", "id": "c13-2", "author": "Rohan", "minutes": 1, "reply_to": null, "text": "kisi ko razorpay ka experience hai?", "label": "help_request"}
+{"conversation": "c13", "channel": "backend", "id": "c13-3", "author": "Arjun", "minutes": 25, "reply_to": "c13-2", "text": "raw body chahiye verify ke liye, express.json() pehle laga diya hoga tune", "label": "progress"}
+{"conversation": "c13", "channel": "backend", "id": "c13-4", "author": "Rohan", "minutes": 40, "reply_to": "c13-3", "text": "bhai sahi pakda, ho gaya 🔥", "label": "progress"}
+{"conversation": "c14", "channel": "ml", "id": "c14-1", "author": "Priya", "minutes": 0, "reply_to": null, "text": "मॉडल ट्रेनिंग पूरी हो गई, accuracy 81%", "label": "progress"}
+{"conversation": "c14", "channel": "ml", "id": "c14-2", "author": "Arjun", "minutes": 5, "reply_to": "c14-1", "text": "sahi hai! report me daal de", "label": "help_request"}
+{"conversation": "c14", "channel": "ml", "id": "c14-3", "author": "Priya", "minutes": 7, "reply_to": null, "text": "accha decide karte hai ki baseline ke saath compare karenge ya nahi", "label": "help_request"}
+{"conversation": "c14", "channel": "ml", "id": "c14-4", "author": "Sneha", "minutes": 9, "reply_to": "c14-3", "text": "haan karna chahiye, examiners puchenge", "label": "decision"}
+{"conversation": "c15", "channel": "general", "id": "c15-1", "author": "Rohan", "minutes": 0, "reply_to": null, "text": "wifi hostel me phir se gayab 🙃 aaj raat kaam nahi ho payega", "label": "blocker"}
+{"conversation": "c15", "channel": "general", "id": "c15-2", "author": "Sneha", "minutes": 3, "reply_to": "c15-1", "text": "classic", "label": "noise"}
+{"conversation": "c15", "channel": "general", "id": "c15-3", "author": "Arjun", "minutes": 5, "reply_to": null, "text": "great, ek aur din bina progress ke 👏👏", "label": "noise"}
+{"conversation": "c16", "channel": "frontend", "id": "c16-1", "author": "Sneha", "minutes": 0, "reply_to": null, "text": "cart screen 70% ho gayi, checkout baaki hai", "label": "progress"}
+{"conversation": "c16", "channel": "frontend", "id": "c16-2", "author": "Sneha", "minutes": 2, "reply_to": null, "text": "figma me checkout ka design hai kya kisi ke paas? link bhejo", "label": "help_request"}
+{"conversation": "c16", "channel": "frontend", "id": "c16-3", "author": "Priya", "minutes": 30, "reply_to": "c16-2", "text": "bheja DM me", "label": "progress"}

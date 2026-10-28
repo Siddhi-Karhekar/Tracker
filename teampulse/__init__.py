@@ -1,1 +1,1 @@
-"""TeamPulse: multi-agent team tracker over GitHub, Notion and Discord."""
+"""TeamPulse: multi-agent assistant that tracks a student team across GitHub, Notion and Discord."""

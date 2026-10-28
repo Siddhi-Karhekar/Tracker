@@ -1,18 +1,20 @@
-# Week 1–2: seeding + ingestion
-PyGithub>=2.3
-notion-client>=2.5      # 2.5+ / 3.x speak Notion API 2025-09-03 (data sources)
+# Week 2: ingestion
 discord.py>=2.4
-python-dotenv>=1.0
 requests>=2.31
-pytest>=8.0
+python-dotenv>=1.0
 
-# Later weeks (uncomment when you get there)
-# langgraph
-# langchain-groq
-# langchain-google-genai
-# langchain-ollama
-# chromadb
-# sentence-transformers
-# streamlit
-# arize-phoenix
-# ragas
+# Week 3: retrieval agent + app
+chromadb>=1.0
+fastembed>=0.4                  # multilingual embeddings via ONNX: small, no PyTorch
+# Optional, heavier (~2 GB with PyTorch): pip install sentence-transformers
+# and set TEAMPULSE_EMBEDDER=intfloat/multilingual-e5-small
+langgraph>=1.0
+openai>=1.40                    # client for Groq / Gemini / Ollama OpenAI-compatible APIs
+streamlit>=1.50                 # st.navigation, st.pills, width="stretch"
+
+# Week 4: tracing (optional; the Phoenix UI itself is `pip install arize-phoenix`)
+arize-phoenix-otel>=0.9
+openinference-instrumentation-langchain>=0.1
+openinference-instrumentation-openai>=0.1
+
+pytest>=8.0

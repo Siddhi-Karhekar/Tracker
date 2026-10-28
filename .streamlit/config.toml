@@ -1,0 +1,23 @@
+[theme]
+base = "light"
+primaryColor = "#2E46C9"
+backgroundColor = "#F3F6F4"
+secondaryBackgroundColor = "#E6EDE9"
+textColor = "#14302B"
+font = "sans serif"
+
+[server]
+headless = true
+runOnSave = false
+# Security: keep cross-site request forgery protection and same-origin rules on (both are Streamlit defaults).
+enableXsrfProtection = true
+enableCORS = true
+maxUploadSize = 1
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+# Security: never show stack traces to visitors. Errors still go to the server log.
+showErrorDetails = "none"
