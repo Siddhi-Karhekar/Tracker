@@ -12,16 +12,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]   # the lock file has per-version markers; test both
     env:
       TEAMPULSE_EMBEDDER: hash     # offline tests: no model download, no API keys
       LLM_PROVIDERS: "off"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements.lock
       - name: Install exact versions

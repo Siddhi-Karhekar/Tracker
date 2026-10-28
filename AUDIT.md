@@ -23,8 +23,8 @@ what is still open.
    AI extractions, labels, task links, conflicts quoting them and cached AI responses.
 
 **Now.** All five are fixed, each with a regression test that failed before the fix and passes after
-(verified for 1, 2, 3 and 5; number 4 follows directly from the code and is covered by tests written with the fix). Eighteen more findings (P2–P3) were fixed, also with tests. 138 tests pass, including on a
-clean install from the new lock file. Coverage is 80%.
+(verified for 1, 2, 3 and 5; number 4 follows directly from the code and is covered by tests written with the fix). Nineteen more findings (P2–P3) were fixed; all except the index, lint and tooling items have their
+own regression test. 138 tests pass, including on clean installs from the new lock file on Python 3.12 and 3.13. Coverage is 80%.
 
 **Readiness.** Ready for a **controlled deployment for one student team** (tens of users, one server), with the
 checklist in section E done. It is **not** verified against the live GitHub, Notion and Discord APIs (this
@@ -60,6 +60,7 @@ Severity: P0 critical, P1 high, P2 medium, P3 low. "Confirmed" means reproduced 
 | TP-20 | P3 | Potential, fixed | Performance | schema | No index for `events.created_at` (blocker queries) or per-person rate-limit lookups | Slower queries as data grows | Two indexes (applied automatically, `IF NOT EXISTS`) | Measured, section D |
 | TP-21 | P3 | Confirmed, fixed | Resource handling | per-thread connections | 268 "unclosed database" warnings in the test run | File handles held until garbage collection | Closed explicitly when the thread is cleaned up | `test_a_threads_connection_is_closed_when_the_thread_is_gone`; warnings now 0 |
 | TP-22 | P3 | Fixed | Supply chain | repo | No lock file, no CI | Untested versions in production; regressions unnoticed | `requirements.lock` (482 pinned packages, tested on a clean install); CI with tests, lint, `pip-audit`, read-only permissions | Clean-venv run: 138 passed |
+| TP-24 | P2 | Confirmed, fixed | Build / supply chain | `requirements.lock` | Found by the first CI run: the lock was generated on Python 3.13 and pinned `audioop-lts`, a backport that only exists for 3.13+, so installation failed on 3.12 (the version CI and many hosts use) | No install on Python 3.12 | Version marker `; python_version >= "3.13"`; CI tests 3.12 and 3.13 | Clean installs on 3.12 and 3.13: 138 passed each; CI matrix |
 | TP-23 | P3 | Fixed | Code quality | various | Unused imports, a duplicated set entry, non-security hashes not marked | Noise that hides real warnings | Cleaned; `usedforsecurity=False` on ID/test hashes | Lint passes |
 
 **Reviewed and not vulnerabilities:** Bandit B608 (9): every SQL string built in code only inserts fixed column
@@ -97,7 +98,7 @@ Existing data is untouched.
 |---|---|---|
 | Baseline tests | `python -m pytest -q --cov=teampulse` | 113 passed, 79% coverage |
 | Final tests | same | **138 passed**, 0 failed, 0 skipped, 80% coverage, 0 unclosed-connection warnings (was 268) |
-| Clean install | new venv, `pip install -r requirements.lock`, pytest | 138 passed |
+| Clean install | new venv, `pip install -r requirements.lock`, pytest | 138 passed on Python 3.13 and on 3.12 (after TP-24) |
 | Regressions fail without the fix | TP-01, 02, 03, 05: tests run before fixing (03 by switching the gate off) | All failed, then passed |
 | Lint (CI rules) | `ruff check --select F,E9,B,S …` | Passed |
 | Static security | `bandit -r teampulse views app.py` | 10 findings, all reviewed false positives (section B) |
@@ -110,7 +111,7 @@ Existing data is untouched.
 services), `maintenance.py` 70% (CLI wrapper untested).
 
 **Not run, and why:** live GitHub/Notion/Discord APIs (no network access to them here; use Data sources → Run
-check); the GitHub Actions workflow itself (needs GitHub; it runs on your next push); the real multilingual
+check); the real multilingual
 embedding model and real AI latency at scale (the load test used the offline embedder and no AI); Firefox and
 Safari; many simultaneous real browser users; accessibility audit.
 
