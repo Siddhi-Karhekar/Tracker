@@ -22,9 +22,10 @@ from teampulse.models import utc_now
 log = logging.getLogger("teampulse.llm")
 
 PROVIDERS = {
-    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
+    # Groq shut down llama-3.3-70b-versatile on 16 Aug 2026 and recommends gpt-oss-120b (console.groq.com/docs/deprecations)
+    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-120b"),
     "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY", "GEMINI_MODEL",
-               "gemini-2.5-flash"),
+               "gemini-3.8-flash"),   # 2.5 still runs, but only for accounts that used it before
     "ollama": (None, None, "OLLAMA_MODEL", "qwen2.5:7b"),
 }
 
@@ -66,6 +67,18 @@ def extract_json(text: str) -> dict:
         return json.loads(match.group(0))
 
 
+def hint(name: str, model: str, status: int | None) -> str:
+    """What to do about a provider error, in one line."""
+    env_model = PROVIDERS[name][2]
+    if status == 404:
+        return (f"model '{model}' isn't available. Set {env_model} in .env to a current model "
+                + ("(e.g. openai/gpt-oss-120b; see console.groq.com/docs/models)" if name == "groq" else
+                   f"(or run: ollama pull {model})" if name == "ollama" else "(see ai.google.dev/gemini-api/docs/models)"))
+    if status in (401, 403):
+        return f"the key was refused. Check {PROVIDERS[name][1]} in .env"
+    return "see the error above"
+
+
 class LLM:
     """Usage counters live in `stats` (calls made, cache hits, failures, tokens, seconds) for the evaluation.
 
@@ -84,6 +97,7 @@ class LLM:
         # quota-eating answer. Answers here are short; JSON batches are the largest.
         self.max_tokens = config.get_int("TEAMPULSE_LLM_MAX_TOKENS", 1500)
         self.stats = {"calls": 0, "cached": 0, "failed": 0, "prompt_tokens": 0, "completion_tokens": 0, "seconds": 0.0}
+        self._dead: dict[str, str] = {}   # providers that can't work (bad key, unknown model): skipped from then on
 
     def reset_stats(self) -> dict:
         old, self.stats = self.stats, {k: 0 if k != "seconds" else 0.0 for k in self.stats}
@@ -136,6 +150,9 @@ class LLM:
 
         errors = []
         for name in self.providers:
+            if name in self._dead:
+                errors.append(f"{name}: {self._dead[name]}")
+                continue
             setup = self._client(name) if name in PROVIDERS else None
             if setup is None:
                 errors.append(f"{name}: not configured")
@@ -143,11 +160,18 @@ class LLM:
             client, model = setup
             try:
                 kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
+                max_tokens = self.max_tokens
+                if name == "groq" and "gpt-oss" in model:
+                    # A reasoning model: keep its thinking short and out of the reply, and leave room for it.
+                    kwargs["extra_body"] = {"reasoning_effort": "low", "include_reasoning": False}
+                    max_tokens = max(max_tokens, 4000)
                 self._throttle()
                 started = time.time()
                 response = client.chat.completions.create(
-                    model=model, messages=messages, temperature=temperature, max_tokens=self.max_tokens, **kwargs)
+                    model=model, messages=messages, temperature=temperature, max_tokens=max_tokens, **kwargs)
                 text = response.choices[0].message.content or ""
+                if not text.strip():
+                    raise LLMError("empty reply (the model may have run out of tokens)")
                 self.stats["calls"] += 1
                 self.stats["seconds"] += time.time() - started
                 usage = getattr(response, "usage", None)
@@ -156,7 +180,12 @@ class LLM:
                     self.stats["completion_tokens"] += getattr(usage, "completion_tokens", 0) or 0
             except Exception as exc:  # rate limit, network, bad model name... try the next provider
                 self.stats["failed"] += 1
-                log.warning("%s failed: %s", name, exc)
+                status = getattr(exc, "status_code", None)
+                if status in (401, 403, 404):   # won't fix itself: stop trying this provider in this run
+                    self._dead[name] = f"{type(exc).__name__} {status}: {hint(name, model, status)}"
+                    log.warning("%s disabled for this run: %s", name, self._dead[name])
+                else:
+                    log.warning("%s failed: %s", name, exc)
                 errors.append(f"{name}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
             if self.conn is not None:
@@ -166,3 +195,33 @@ class LLM:
                         (key, text, name, utc_now()))
             return LLMReply(text, name)
         raise LLMError("No LLM provider worked. " + " | ".join(errors))
+
+    def check(self) -> list[dict]:
+        """Try each configured provider once (not cached). For evaluations: stop early with a clear reason
+        instead of quietly falling back to the rules and reporting that as an AI result."""
+        out = []
+        for name in self.providers:
+            if name not in PROVIDERS:
+                continue
+            setup = self._client(name)
+            if setup is None:
+                out.append({"provider": name, "ok": False, "detail": f"not configured ({PROVIDERS[name][1]} is empty)"})
+                continue
+            probe = LLM(None, providers=[name])
+            try:
+                reply = probe.chat([{"role": "user", "content": "Reply with the single word: ready"}])
+                out.append({"provider": name, "ok": True, "detail": f"{setup[1]} answered “{reply.text.strip()[:20]}”"})
+            except Exception as exc:   # noqa: BLE001
+                out.append({"provider": name, "ok": False,
+                            "detail": probe._dead.get(name) or str(exc).replace("No LLM provider worked. ", "")[:200]})
+        return out
+
+
+def require_working(llm: "LLM") -> None:
+    """Exit with a readable report if no AI provider works (used by the evaluation commands)."""
+    report = llm.check()
+    for r in report:
+        print(f"  {'OK ' if r['ok'] else 'NO '} {r['provider']:7} {r['detail']}")
+    if not any(r["ok"] for r in report):
+        raise SystemExit("No AI provider works, so an AI evaluation would only measure the fallback rules. "
+                         "Fix one of the providers above, or add --offline.")

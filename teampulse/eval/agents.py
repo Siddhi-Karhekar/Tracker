@@ -390,6 +390,10 @@ def main():
     parser.add_argument("--langsmith", action="store_true", help="also log the run to LangSmith (needs LANGSMITH_API_KEY)")
     args = parser.parse_args()
     out = Path(config.DB_PATH).parent / "eval"
+    if not args.offline:
+        from teampulse.llm import LLM, require_working
+        print("Checking the AI providers…")
+        require_working(LLM(None))
     print(f"Evaluating agents ({'offline' if args.offline else 'with AI'})…")
     result = run(args.offline, out, args.only.split(",") if args.only else None)
     stamp = time.strftime("%Y%m%d-%H%M%S")

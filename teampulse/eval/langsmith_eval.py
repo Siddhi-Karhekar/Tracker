@@ -145,6 +145,10 @@ def main():
     args = parser.parse_args()
     if not config.get("LANGSMITH_API_KEY"):
         raise SystemExit("Set LANGSMITH_API_KEY (free at smith.langchain.com → Settings → API keys).")
+    if not args.offline:   # don't publish an "AI" experiment that really measured the fallback rules
+        from teampulse.llm import LLM, require_working
+        print("Checking the AI providers…")
+        require_working(LLM(None))
     started = time.time()
     results = run_experiment(args.offline, Path(config.DB_PATH).parent / "eval")
     print(summary(results))

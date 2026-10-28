@@ -57,6 +57,10 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     make_llm = (lambda: LLM(None, providers=["off"])) if args.no_llm else (lambda: LLM(None))
     use_llm = not args.no_llm
+    if use_llm:
+        from teampulse.llm import require_working
+        print("Checking the AI providers…")
+        require_working(LLM(None))
     sections, raw = [f"# TeamPulse evaluation report\n\n{environment()}"], {}
 
     print("1/4 Chat classifier…")

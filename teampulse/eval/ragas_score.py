@@ -28,9 +28,9 @@ import time
 from pathlib import Path
 
 JUDGES = {   # base URL, key variable, model variable, default model
-    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
+    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-120b"),
     "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY", "GEMINI_MODEL",
-               "gemini-2.5-flash"),
+               "gemini-3.8-flash"),
     "ollama": (None, None, "OLLAMA_MODEL", "qwen2.5:7b"),
 }
 METRICS = ("faithfulness", "context_precision", "context_recall", "factual_correctness")

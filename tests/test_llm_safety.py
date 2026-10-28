@@ -65,3 +65,57 @@ def test_invalid_values_raise_even_under_python_O(tmp_path):
         discrepancies.set_verdict(conn, "x", "maybe")
     with pytest.raises(ValueError):
         contributions.set_review(conn, "Kabir", "deleted")
+
+
+class _StatusError(Exception):
+    def __init__(self, status, msg="model `x` does not exist"):
+        super().__init__(f"Error code: {status} - {msg}")
+        self.status_code = status
+
+
+class _Provider:
+    def __init__(self, behaviour):
+        self.behaviour, self.calls = behaviour, []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if isinstance(self.behaviour, Exception):
+            raise self.behaviour
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.behaviour))], usage=None)
+
+
+def test_a_retired_model_is_reported_once_with_the_fix_and_then_skipped(caplog):
+    """Regression: Groq retired the default model; every call retried it and the logs never said what to do."""
+    llm = LLM(providers=["groq", "ollama"])
+    groq, ollama = _Provider(_StatusError(404)), _Provider("fine")
+    llm._clients = {"groq": (groq, "llama-3.3-70b-versatile"), "ollama": (ollama, "qwen2.5:7b")}
+    for _ in range(3):
+        assert llm.chat([{"role": "user", "content": "hi"}]).provider == "ollama"
+    assert len(groq.calls) == 1                                     # tried once, then skipped
+    assert "GROQ_MODEL" in llm._dead["groq"] and "gpt-oss-120b" in llm._dead["groq"]
+
+
+def test_an_empty_reply_is_not_accepted_as_an_answer():
+    llm = LLM(providers=["groq", "ollama"])
+    llm._clients = {"groq": (_Provider("   "), "openai/gpt-oss-120b"), "ollama": (_Provider("real answer"), "m")}
+    assert llm.chat([{"role": "user", "content": "hi"}]).text == "real answer"
+
+
+def test_gpt_oss_gets_low_reasoning_and_room_to_answer():
+    llm = LLM(providers=["groq"])
+    groq = _Provider("ok")
+    llm._clients = {"groq": (groq, "openai/gpt-oss-120b")}
+    llm.chat([{"role": "user", "content": "hi"}])
+    sent = groq.calls[0]
+    assert sent["extra_body"] == {"reasoning_effort": "low", "include_reasoning": False} and sent["max_tokens"] >= 4000
+
+
+def test_evaluations_stop_when_no_ai_works(monkeypatch, capsys):
+    import pytest
+
+    from teampulse import llm as llm_module
+    monkeypatch.setattr(llm_module.LLM, "_client", lambda self, name: (_Provider(_StatusError(404)), "gone-model"))
+    with pytest.raises(SystemExit, match="only measure the fallback rules"):
+        llm_module.require_working(LLM(providers=["groq"]))
+    assert "GROQ_MODEL" in capsys.readouterr().out
