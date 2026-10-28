@@ -42,6 +42,26 @@ jobs:
           --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3813
           --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815
 
+  windows:
+    # Many students run TeamPulse on Windows; the lock file must install and the tests must pass there too.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      TEAMPULSE_EMBEDDER: hash
+      LLM_PROVIDERS: "off"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - run: pip install -r requirements.lock pytest
+      - run: python -m pytest -q
+
   ragas-wiring:
     # RAGAS needs older LangChain/OpenAI than the app, so it gets its own environment (requirements-eval.txt).
     # This checks the scorer drives the real RAGAS metrics; real scores need a judge key (see README).
