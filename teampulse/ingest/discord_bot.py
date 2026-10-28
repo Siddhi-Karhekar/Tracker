@@ -10,6 +10,7 @@ Privacy by design:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -71,6 +72,9 @@ def cursor_key(channel_id: int) -> str:
 
 # ---- bot -----------------------------------------------------------------------------------
 
+HEARTBEAT_SECONDS = 300
+
+
 class TeamPulseBot(discord.Client):
     def __init__(self, guild_id: int, backfill_days: int):
         intents = discord.Intents.default()
@@ -103,6 +107,14 @@ class TeamPulseBot(discord.Client):
         for channel in channels:
             await self.backfill(channel)
         log.info("Backfill done. Listening live. %d member(s) have joined.", len(self.consented))
+        if not getattr(self, "_beating", False):
+            self._beating = True
+            self.loop.create_task(self._heartbeat())
+
+    async def _heartbeat(self):
+        while not self.is_closed():          # lets the app show whether the bot is actually running
+            db.beat(self.conn, "discord")
+            await asyncio.sleep(HEARTBEAT_SECONDS)
 
     async def backfill(self, channel):
         perms = channel.permissions_for(channel.guild.me)

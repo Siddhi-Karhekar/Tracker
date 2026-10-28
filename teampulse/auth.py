@@ -205,13 +205,21 @@ def validate_new_user(conn, display_name: str, username: str, role: str, member_
         raise AuthError("That team member record doesn't exist.")
 
 
-def _insert_user(conn, display_name, username, role, member_name, password, must_change, created_by) -> str:
+def _insert_user(conn, display_name, username, role, member_name, password, must_change, created_by,
+                 only_if_no_leader: bool = False) -> str:
     user_id = secrets.token_hex(12)
+    password_hash = hash_password(password)   # slow on purpose; done before the write lock is taken
+    # only_if_no_leader makes "is there a leader yet?" and the insert one statement, so two people setting up
+    # at the same moment can't both become the first leader.
+    guard = " WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'leader')" if only_if_no_leader else ""
     with conn:
-        conn.execute("INSERT INTO users (id, username, display_name, role, password_hash, must_change, active, "
-                     "member_name, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
-                     (user_id, username, display_name.strip(), role, hash_password(password), int(must_change),
-                      member_name or None, iso(now()), created_by))
+        inserted = conn.execute(
+            "INSERT INTO users (id, username, display_name, role, password_hash, must_change, active, member_name, "
+            "created_at, created_by) SELECT ?, ?, ?, ?, ?, ?, 1, ?, ?, ?" + guard,
+            (user_id, username, display_name.strip(), role, password_hash, int(must_change), member_name or None,
+             iso(now()), created_by)).rowcount
+    if not inserted:
+        raise AuthError("A team leader already exists. Ask them to create your account.")
     return user_id
 
 
@@ -227,7 +235,8 @@ def create_first_leader(conn, display_name: str, username: str | None = None, pa
         if problem:
             raise AuthError(problem)
     password = password or generate_password()
-    user_id = _insert_user(conn, display_name, username, "leader", None, password, must_change, None)
+    user_id = _insert_user(conn, display_name, username, "leader", None, password, must_change, None,
+                           only_if_no_leader=True)
     audit(conn, Actor(user_id, username, display_name, "leader"), "account.create_first_leader", username)
     return username, password
 
@@ -266,24 +275,39 @@ def _throttle_key(username: str) -> str:
     return username.strip().lower()[:64]
 
 
-def login(conn, username: str, password: str) -> tuple[str, Actor]:
-    """Returns (session token, actor) or raises AuthError with a safe, specific message."""
-    key = _throttle_key(username)
-    row = conn.execute("SELECT failures, locked_until FROM login_throttle WHERE key = ?", (key,)).fetchone()
+def _check_lock(conn, key: str) -> None:
+    row = conn.execute("SELECT locked_until FROM login_throttle WHERE key = ?", (key,)).fetchone()
     if row and row["locked_until"] and row["locked_until"] > iso(now()):
         minutes = max(1, int((datetime.fromisoformat(row["locked_until"]) - now()).total_seconds() // 60) + 1)
         raise AuthError(f"Too many failed attempts. Try again in {minutes} minute{'s' if minutes != 1 else ''}.")
+
+
+def _record_failure(conn, key: str) -> bool:
+    """Count a failed attempt; returns True if this one locked the key.
+
+    One transaction, and the count is incremented inside SQLite (failures + 1), so guesses sent in parallel
+    can't overwrite each other's count and dodge the lock (tests/test_concurrency.py)."""
+    with conn:
+        conn.execute("INSERT INTO login_throttle (key, failures) VALUES (?, 1) "
+                     "ON CONFLICT(key) DO UPDATE SET failures = failures + 1", (key,))
+        failures = conn.execute("SELECT failures FROM login_throttle WHERE key = ?", (key,)).fetchone()[0]
+        if failures < MAX_FAILURES:
+            return False
+        conn.execute("UPDATE login_throttle SET failures = 0, locked_until = ? WHERE key = ?",
+                     (iso(now() + timedelta(minutes=LOCK_MINUTES)), key))
+    return True
+
+
+def login(conn, username: str, password: str) -> tuple[str, Actor]:
+    """Returns (session token, actor) or raises AuthError with a safe, specific message."""
+    key = _throttle_key(username)
+    _check_lock(conn, key)
     user = conn.execute("SELECT * FROM users WHERE username = ?", (key,)).fetchone()
     ok = user is not None and verify_password(password, user["password_hash"])
     if user is None:
         _burn_time(password)
     if not ok:
-        failures = (row["failures"] if row else 0) + 1
-        locked = iso(now() + timedelta(minutes=LOCK_MINUTES)) if failures >= MAX_FAILURES else None
-        with conn:
-            conn.execute("INSERT INTO login_throttle (key, failures, locked_until) VALUES (?, ?, ?) "
-                         "ON CONFLICT(key) DO UPDATE SET failures = ?, locked_until = ?",
-                         (key, 0 if locked else failures, locked, 0 if locked else failures, locked))
+        locked = _record_failure(conn, key)
         audit(conn, None, "auth.login", key, "failed", "locked" if locked else "")
         time.sleep(0.4)
         if locked:
@@ -360,9 +384,14 @@ def revoke_all(conn, user_id: str, except_token: str | None = None) -> None:
 
 
 def change_password(conn, actor: Actor, token: str, current: str, new: str) -> None:
+    key = _throttle_key(actor.username)          # same counter as sign-in: a stolen session can't guess it
+    _check_lock(conn, key)
     user = get_user(conn, actor.id)
     if user is None or not verify_password(current, user["password_hash"]):
+        locked = _record_failure(conn, key)
         audit(conn, actor, "auth.change_password", actor.username, "failed", "wrong current password")
+        if locked:
+            raise AuthError(f"Too many failed attempts. Try again in {LOCK_MINUTES} minutes.")
         raise AuthError("Your current password isn't right.")
     if hmac.compare_digest(current, new):
         raise AuthError("Choose a password different from the current one.")
@@ -377,12 +406,42 @@ def change_password(conn, actor: Actor, token: str, current: str, new: str) -> N
 
 # ---- permissions -------------------------------------------------------------------------------------
 
+SETUP_CODE_MIN = 16
+SETUP_KEY = "!setup"   # "!" can't appear in a username, so this counter is never shared with an account
+
+
+def check_setup_code(conn, given: str, expected: str | None) -> None:
+    """Gate for creating the first leader from the sign-in page. Throttled like sign-in, and the configured
+    code must be long enough that guessing it isn't practical."""
+    if not expected or len(expected) < SETUP_CODE_MIN:
+        raise AuthError(f"TEAMPULSE_SETUP_CODE must be at least {SETUP_CODE_MIN} characters. Set a longer one "
+                        "in the app's settings, or create the leader from the command line.")
+    _check_lock(conn, SETUP_KEY)
+    if not hmac.compare_digest(given.encode(), expected.encode()):
+        locked = _record_failure(conn, SETUP_KEY)
+        audit(conn, None, "account.create_first_leader", "", "denied", "wrong setup code")
+        time.sleep(0.4)
+        raise AuthError(f"Too many failed attempts. Try again in {LOCK_MINUTES} minutes." if locked
+                        else "That setup code isn't right.")
+
+
 def contrib_review_enabled() -> bool:
     return (config.get("TEAMPULSE_CONTRIB_REVIEW", "on") or "on").lower() != "off"
 
 
+# In the public demo every visitor signs in as the same demo leader, so anything that would change the demo
+# for everyone else (accounts, settings) or spend the shared AI quota in bulk is switched off.
+DEMO_LOCKED = {"users.manage", "settings.manage", "eval.run", "sources.check"}
+
+
+def public_demo() -> bool:
+    return (config.get("TEAMPULSE_PUBLIC_DEMO", "off") or "off").lower() == "on"
+
+
 def can(actor: Actor | None, permission: str) -> bool:
     if actor is None or actor.must_change:
+        return False
+    if permission in DEMO_LOCKED and public_demo():
         return False
     if actor.role == "leader":
         return permission in PERMISSIONS
@@ -395,6 +454,9 @@ def require(conn, actor: Actor | None, permission: str, target: str = "") -> Act
     """The server-side gate. Every change to data goes through this first."""
     if not can(actor, permission):
         audit(conn, actor, permission, target, "denied")
+        if actor and permission in DEMO_LOCKED and public_demo():
+            raise PermissionDenied("This is switched off in the public demo, so visitors can't change it for "
+                                   "everyone else. It works normally on your own copy.")
         who = ROLE_NAME.get(actor.role, "Your account") if actor else "You"
         raise PermissionDenied(f"{who}s can't do this. Only the team leader can."
                                if actor and actor.role == "member" else f"{who} must sign in to do this.")

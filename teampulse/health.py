@@ -152,7 +152,37 @@ def check_all(session=requests) -> list[Check]:
     return check_github(session) + check_notion(session) + check_discord(session)
 
 
+def process_status(conn) -> dict:
+    """Is each background process alive? 'ok', 'stale' (no heartbeat for 3 intervals) or 'never' (not started).
+
+    Only processes whose source is configured are judged; the others are 'not used'."""
+    from datetime import datetime, timezone
+
+    from teampulse import db
+    limits = {"poller": 3 * config.get_int("POLL_MINUTES", 5) * 60, "discord": 3 * 300}
+    needed = {"poller": bool(config.get("GITHUB_TOKEN") or config.get("NOTION_TOKEN")),
+              "discord": bool(config.get("DISCORD_BOT_TOKEN"))}
+    out = {}
+    for process, key in db.HEARTBEAT.items():
+        last = db.get_state(conn, key)
+        if not needed[process]:
+            out[process] = {"state": "not used", "last": last}
+            continue
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() if last else None
+        out[process] = {"state": "never" if age is None else "ok" if age <= limits[process] else "stale",
+                        "last": last}
+    return out
+
+
 def main():
+    import sys
+    if sys.argv[1:] == ["status"]:   # for uptime monitors / cron: exit code 1 if a needed process is down
+        import json
+
+        from teampulse import db
+        status = process_status(db.connect())
+        print(json.dumps(status, indent=2))
+        sys.exit(0 if all(v["state"] in ("ok", "not used") for v in status.values()) else 1)
     for c in check_all():
         mark = {True: "OK  ", False: "FIX ", None: "--  "}[c.ok]
         print(f"{mark} {c.source:8} {c.name:28} {c.detail}" + (f"\n{'':44}→ {c.fix}" if c.fix and c.ok is not True else ""))

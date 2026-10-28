@@ -25,6 +25,10 @@ def show_credentials():
             st.rerun()
 
 
+locked = not auth.can(actor, "users.manage")   # e.g. the public demo, where every visitor is the same leader
+if locked:
+    st.info("Account and access changes are switched off in the public demo, so one visitor can't change them "
+            "for everyone else. You can still look around; it all works on your own copy.")
 show_credentials()
 add, people, visibility, activity = st.tabs(["Add a teammate", "Accounts", "What members can see", "Activity"])
 
@@ -41,7 +45,7 @@ with add:
         link = c4.selectbox("Who are they in the team data?", ["(not linked)"] + [m for m in members if m not in taken],
                             help="Links the account to their GitHub, Notion and Discord activity, so they can review "
                                  "their own contribution report.")
-        if st.form_submit_button("Create account", type="primary", icon=":material/person_add:"):
+        if st.form_submit_button("Create account", type="primary", icon=":material/person_add:", disabled=locked):
             try:
                 new_user, password = actions.create_user(conn, actor, name, role, username or None,
                                                          None if link == "(not linked)" else link)
@@ -63,7 +67,7 @@ with people:
                           f"{ui.pill(status[0], status[1])}<br><span class='tp-meta'>{ui.e(u['username'])}{linked}. "
                           f"Last signed in {ui.ago(u['last_login'])}.</span>", unsafe_allow_html=True)
             b1, b2 = buttons.columns(2)
-            if b1.button("Reset password", key=f"reset-{u['id']}", icon=":material/key:", width="stretch",
+            if b1.button("Reset password", key=f"reset-{u['id']}", icon=":material/key:", width="stretch", disabled=locked,
                          help="Issues a new one-time password and signs them out everywhere"):
                 try:
                     name_, password = actions.reset_credentials(conn, actor, u["id"])
@@ -73,7 +77,7 @@ with people:
                     st.error(str(exc))
             if u["id"] != actor.id:
                 label, icon = ("Deactivate", ":material/block:") if u["active"] else ("Reactivate", ":material/check_circle:")
-                if b2.button(label, key=f"active-{u['id']}", icon=icon, width="stretch"):
+                if b2.button(label, key=f"active-{u['id']}", icon=icon, width="stretch", disabled=locked):
                     try:
                         actions.set_active(conn, actor, u["id"], not u["active"])
                         st.rerun()
@@ -86,9 +90,12 @@ with visibility:
     current = set(auth.member_pages(conn))
     with st.form("visibility"):
         chosen = [key for key, title in auth.PAGES.items() if st.checkbox(title, value=key in current, key=f"page-{key}")]
-        if st.form_submit_button("Save", icon=":material/save:"):
-            actions.set_member_pages(conn, actor, chosen)
-            st.success("Saved. Members see the change on their next click.")
+        if st.form_submit_button("Save", icon=":material/save:", disabled=not auth.can(actor, "settings.manage")):
+            try:
+                actions.set_member_pages(conn, actor, chosen)
+                st.success("Saved. Members see the change on their next click.")
+            except (auth.AuthError, auth.PermissionDenied) as exc:
+                st.error(str(exc))
 
 with activity:
     rows = conn.execute("SELECT at, actor_name, action, target, outcome FROM audit_log WHERE action != 'ask' "

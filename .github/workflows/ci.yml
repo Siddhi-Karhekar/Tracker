@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read          # least privilege: CI only reads the code
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TEAMPULSE_EMBEDDER: hash     # offline tests: no model download, no API keys
+      LLM_PROVIDERS: "off"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install exact versions
+        run: pip install -r requirements.lock pytest ruff pip-audit
+      - name: Lint (errors, bug patterns, security rules)
+        run: ruff check --select F,E9,B,S --ignore S105,S311,S608,B905,B008 teampulse views app.py
+      - name: Tests
+        run: python -m pytest -q
+      - name: Dependency vulnerabilities
+        # The ignored IDs are ChromaDB HTTP-server advisories with no fix yet. TeamPulse runs Chroma embedded
+        # (no server, no port), so they can't be reached. Remove each ignore when a fixed version ships.
+        run: >
+          pip-audit -r requirements.lock
+          --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3813
+          --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815

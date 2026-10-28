@@ -105,9 +105,19 @@ _MD_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
 _MD_SPECIAL = re.compile(r"([\\`*_\[\]<>#!|])")
 
 
+_MD_LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(\s*<?([^)\s>]*)>?(?:\s+\"[^\"]*\")?\s*\)")
+_MD_AUTOLINK = re.compile(r"<((?:https?|mailto|javascript|data):[^>\s]*)>", re.I)
+
+
 def md_safe(text) -> str:
-    """For untrusted text shown as Markdown (AI answers): keep links, drop embedded images."""
-    return _MD_IMAGE.sub(r"\1", str(text or ""))
+    """For untrusted text shown as Markdown (AI answers, which can repeat what's in chat or an issue).
+
+    Embedded images are dropped (they load from any server the text names). Links the text itself makes are
+    shown as "label (address)", so a message can't disguise a phishing link as a friendly label; the
+    citation links TeamPulse adds afterwards are the only real links in an answer."""
+    text = _MD_IMAGE.sub(r"\1", str(text or ""))
+    text = _MD_LINK.sub(lambda m: f"{m.group(1)} ({m.group(2)})" if m.group(2) else m.group(1), text)
+    return _MD_AUTOLINK.sub(r"\1", text)
 
 
 def md_text(text) -> str:

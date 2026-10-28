@@ -291,7 +291,7 @@ def test_ask_rate_limit(team, monkeypatch):
     monkeypatch.setenv("TEAMPULSE_ASK_PER_HOUR", "2")
 
     class Agent:
-        def ask(self, question, history=None, allow_memory_write=True):
+        def ask(self, question, history=None, allow_memory_write=True, allowed_specialists=None):
             return {"answer": "ok", "evidence": [], "cited": []}
 
     actions.ask(conn, member, Agent(), "q1", [])
@@ -300,3 +300,101 @@ def test_ask_rate_limit(team, monkeypatch):
         actions.ask(conn, member, Agent(), "q3", [])
     assert actions.ask(conn, leader, Agent(), "q1", [])["answer"] == "ok"   # limits are per person
     assert "q1" not in "\n".join(str(tuple(r)) for r in conn.execute("SELECT * FROM audit_log"))  # questions not logged
+
+
+class RouterTo:
+    """An AI router that sends every question to one specialist, whatever the person is allowed to see."""
+
+    def __init__(self, specialist):
+        self.specialist = specialist
+
+    def chat(self, messages, json_mode=False, temperature=0.0):
+        if "supervisor" in messages[0]["content"]:
+            q = messages[-1]["content"].split("New question:")[-1].strip()
+            return LLMReply(json.dumps({"standalone_question": q,
+                                        "parts": [{"question": q, "specialist": self.specialist}]}), "fake")
+        raise RuntimeError("no AI in this test")
+
+
+def test_asking_cannot_reach_a_page_the_leader_closed(team):
+    """Regression: hiding Contributions from members used to leave the same reports one question away in Ask."""
+    conn, leader, member, tmp = team
+    index = EventIndex(conn, embedder=HashEmbedder(), path=str(tmp / "chroma"))
+    llm = RouterTo("contributions")
+    agent = SupervisorAgent(conn, retrieval=RetrievalAgent(conn, index=index, llm=llm), llm=llm)
+    open_answer = actions.ask(conn, member, agent, "what did Kabir do this week?", [])
+    assert "hasn't opened" not in open_answer["answer"] and open_answer["evidence"]      # page open: answered
+
+    actions.set_member_pages(conn, leader, ["home", "ask", "blockers"])                 # leader closes it
+    closed = actions.ask(conn, member, agent, "what did Kabir do this week?", [])
+    assert "hasn't opened" in closed["answer"] and not closed["evidence"]
+    assert not closed.get("memories")                                                   # memory page closed too
+    assert "contributions" in actions.allowed_specialists(conn, leader)                  # leaders keep everything
+    led = actions.ask(conn, leader, agent, "what did Kabir do this week?", [])
+    assert "hasn't opened" not in led["answer"]
+
+
+def test_public_demo_visitors_cannot_change_accounts_or_settings_for_everyone(team, monkeypatch):
+    """Regression: in the public demo every visitor is the same leader, so one could lock everyone else out."""
+    conn, leader, member, _ = team
+    monkeypatch.setenv("TEAMPULSE_PUBLIC_DEMO", "on")
+    kabir = conn.execute("SELECT id FROM users WHERE username = 'kabir'").fetchone()[0]
+    before = conn.execute("SELECT COUNT(*), SUM(active) FROM users").fetchone()[:]
+    for call in (lambda: actions.create_user(conn, leader, "Visitor", "leader"),
+                 lambda: actions.set_active(conn, leader, kabir, False),
+                 lambda: actions.reset_credentials(conn, leader, kabir),
+                 lambda: actions.set_member_pages(conn, leader, []),
+                 lambda: actions.check_connections(conn, leader),
+                 lambda: actions.run_evaluation(conn, leader, "llm", None)):
+        with pytest.raises(auth.PermissionDenied, match="public demo"):
+            call()
+    assert conn.execute("SELECT COUNT(*), SUM(active) FROM users").fetchone()[:] == before
+    assert auth.member_pages(conn) == auth.DEFAULT_MEMBER_PAGES
+    assert auth.can(leader, "data.edit") and auth.can(leader, "memory.write")   # the demo stays explorable
+    monkeypatch.setenv("TEAMPULSE_PUBLIC_DEMO", "off")
+    assert auth.can(leader, "users.manage")                                      # normal copies unaffected
+
+
+def test_setup_code_is_throttled_and_must_be_long(team, monkeypatch):
+    conn, *_ = team
+    monkeypatch.setattr(auth.time, "sleep", lambda s: None)
+    with pytest.raises(auth.AuthError, match="at least 16"):
+        auth.check_setup_code(conn, "short", "short")                 # weak configured code refused outright
+    code = "a-long-random-setup-code-123"
+    for _ in range(auth.MAX_FAILURES - 1):
+        with pytest.raises(auth.AuthError, match="isn't right"):
+            auth.check_setup_code(conn, "guess", code)
+    with pytest.raises(auth.AuthError, match="Too many"):
+        auth.check_setup_code(conn, "guess", code)
+    with pytest.raises(auth.AuthError, match="Too many"):
+        auth.check_setup_code(conn, code, code)                       # locked even with the right code
+    assert conn.execute("SELECT COUNT(*) FROM login_throttle WHERE key = 'neha'").fetchone()[0] == 0
+
+
+def test_wrong_current_password_is_throttled(team, monkeypatch):
+    conn, leader, member, _ = team
+    monkeypatch.setattr(auth.time, "sleep", lambda s: None)
+    token = auth.login(conn, member.username, MEMBER_PW)[0]
+    for _ in range(auth.MAX_FAILURES - 1):
+        with pytest.raises(auth.AuthError, match="isn't right"):
+            auth.change_password(conn, member, token, "guess-guess-1", "a-brand-new-password-9")
+    with pytest.raises(auth.AuthError, match="Too many"):
+        auth.change_password(conn, member, token, "guess-guess-1", "a-brand-new-password-9")
+    with pytest.raises(auth.AuthError, match="Too many"):
+        auth.change_password(conn, member, token, MEMBER_PW, "a-brand-new-password-9")
+
+
+def test_a_crash_while_answering_is_reported_safely_and_logged_as_failed(team):
+    conn, leader, member, _ = team
+
+    class Broken:
+        def ask(self, *a, **k):
+            raise RuntimeError("chroma: /srv/data/secret_path corrupted")
+
+    with pytest.raises(actions.ServiceError) as err:
+        actions.ask(conn, member, Broken(), "what's blocked?", [])
+    assert "secret_path" not in str(err.value) and "try again" in str(err.value)
+    row = conn.execute("SELECT outcome, detail FROM audit_log WHERE action='ask' ORDER BY id DESC").fetchone()
+    assert tuple(row) == ("failed", "RuntimeError")
+    with pytest.raises(auth.AuthError, match="Type a question"):
+        actions.ask(conn, member, Broken(), "   ", [])

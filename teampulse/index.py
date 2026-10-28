@@ -81,7 +81,7 @@ class HashEmbedder:
     def _vec(self, text: str) -> list[float]:
         vec = [0.0] * self.dims
         for word in re.findall(r"\w+", text.lower()):
-            vec[int(hashlib.md5(word.encode()).hexdigest(), 16) % self.dims] += 1.0
+            vec[int(hashlib.md5(word.encode(), usedforsecurity=False).hexdigest(), 16) % self.dims] += 1.0
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         return [v / norm for v in vec]
 

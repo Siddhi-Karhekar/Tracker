@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import weakref
 from pathlib import Path
 
 from teampulse import config
@@ -30,6 +32,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_source_kind ON events(source, kind);
 CREATE INDEX IF NOT EXISTS idx_events_author ON events(source, author);
 CREATE INDEX IF NOT EXISTS idx_events_updated ON events(updated_at);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 
 -- Where each poller / channel left off.
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -213,6 +216,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     detail      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id, action, at);   -- per-person rate limits
 
 -- Workspace settings the leader controls (e.g. which pages members can open).
 CREATE TABLE IF NOT EXISTS settings (
@@ -236,17 +240,63 @@ EVENT_COLUMNS = [
 ]
 
 
+BUSY_SECONDS = 15   # wait this long for another writer (app, bot, poller) instead of failing at once
+
+
+def _open(path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(path, timeout=BUSY_SECONDS, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+class ThreadConnection:
+    """One SQLite connection per thread, behind one shared object.
+
+    The app keeps a single agent (and so a single connection object) for everyone, but Streamlit runs each
+    visitor's page on its own thread. A plain shared connection mixes their transactions: one person's
+    rollback can undo another's write, and a commit can save someone else's half-finished change
+    (tests/test_concurrency.py). Here every thread transparently gets its own connection, so each `with conn:`
+    is a real, separate transaction. A thread's connection is closed when the thread ends.
+    """
+
+    def __init__(self, path: str):
+        self._path = path
+        self._local = threading.local()
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._local.conn = _open(self._path)
+            # Close it when the thread is cleaned up (Streamlit uses a new thread for each rerun), rather than
+            # leaving it to the garbage collector.
+            weakref.finalize(threading.current_thread(), conn.close)
+        return conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn(), name)
+
+    def __enter__(self):
+        return self._conn().__enter__()
+
+    def __exit__(self, *exc):
+        return self._conn().__exit__(*exc)
+
+
 def connect(path: str | None = None) -> sqlite3.Connection:
     path = path or config.DB_PATH
-    if path != ":memory:":
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, check_same_thread=False)   # Streamlit runs code on worker threads
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")   # bot and pollers can write at the same time
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(SCHEMA)
-    _migrate(conn)
-    return conn
+    if path == ":memory:":   # a private in-memory database (tests, evaluation): one connection is the database
+        conn = _open(path)
+        conn.executescript(SCHEMA)
+        _migrate(conn)
+        return conn
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    setup = _open(path)
+    setup.execute("PRAGMA journal_mode=WAL")   # readers never block the writer; the bot and pollers write too
+    setup.executescript(SCHEMA)
+    _migrate(setup)
+    setup.close()
+    return ThreadConnection(path)   # type: ignore[return-value]  (behaves like sqlite3.Connection)
 
 
 # Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS won't add them to old databases.
@@ -286,9 +336,39 @@ def upsert_events(conn: sqlite3.Connection, events) -> int:
     return count
 
 
+# Tables that hold copies or by-products of an event without a foreign key (signals and claims cascade).
+DERIVED_TABLES = ("extractions", "labels", "task_links", "link_feedback")
+
+
+def _delete_with_copies(conn: sqlite3.Connection, ids: list[str]) -> int:
+    """Delete events and everything derived from them, in the caller's transaction. Returns events deleted.
+
+    The search index drops them on its next sync (EventIndex.sync removes vectors whose event is gone)."""
+    if not ids:
+        return 0
+    removed = 0
+    for i in range(0, len(ids), 500):        # stay under SQLite's limit on query parameters
+        chunk = ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for table in DERIVED_TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE event_id IN ({marks})", chunk)
+        removed += conn.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk).rowcount
+        for event_id in chunk:               # conflicts that quote the message; rebuilt on the next comparison
+            conn.execute("DELETE FROM discrepancies WHERE instr(sides, ?) > 0", (f'"{event_id}"',))
+    return removed
+
+
 def delete_event(conn: sqlite3.Connection, event_id: str) -> None:
     with conn:
-        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        _delete_with_copies(conn, [event_id])
+
+
+HEARTBEAT = {"poller": "heartbeat:poller", "discord": "heartbeat:discord"}
+
+
+def beat(conn: sqlite3.Connection, process: str) -> None:
+    """Long-running processes call this regularly so the app can tell "connected" from "stopped"."""
+    set_state(conn, HEARTBEAT[process], utc_now())
 
 
 def get_state(conn: sqlite3.Connection, key: str) -> str | None:
@@ -332,11 +412,16 @@ def set_discord_consent(conn: sqlite3.Connection, discord_id: str, name: str, co
 
 
 def delete_discord_messages_of(conn: sqlite3.Connection, discord_id: str) -> int:
+    """Opt-out: delete the person's messages and every copy derived from them.
+
+    Cached AI responses are keyed by a hash of the prompt, so the ones that quoted this person can't be picked
+    out; the whole cache is cleared instead (it only costs re-asking the AI)."""
     with conn:
-        cur = conn.execute(
-            "DELETE FROM events WHERE source = 'discord' AND author = ?", (discord_id,)
-        )
-    return cur.rowcount
+        ids = [r[0] for r in conn.execute("SELECT id FROM events WHERE source = 'discord' AND author = ?",
+                                          (discord_id,))]
+        removed = _delete_with_copies(conn, ids)
+        conn.execute("DELETE FROM llm_cache")
+    return removed
 
 
 def count_events(conn: sqlite3.Connection, source: str, author: str) -> int:

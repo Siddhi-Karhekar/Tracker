@@ -13,6 +13,7 @@ and the user is told if the live data now says something different.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from datetime import date
@@ -20,13 +21,14 @@ from datetime import date
 from teampulse.llm import LLM, extract_json
 from teampulse.models import utc_now
 
+log = logging.getLogger("teampulse.memory")
 REMEMBER_RE = re.compile(r"^\s*(please\s+)?(remember|note down|note that|keep in mind|yaad\s+rakh\w*)\b[\s:,\-]*"
                          r"(that\s+|ki\s+)?(?P<fact>.+)$", re.I | re.S)
 FORGET_RE = re.compile(r"^\s*(please\s+)?(forget|bhool\s+ja\w*|delete the memory)\b[\s:,\-]*(that\s+|about\s+|ki\s+)?"
                        r"(?P<fact>.+)$", re.I | re.S)
 RECALL_RE = re.compile(r"what (do|did) you remember|team memory|\bmemories\b|kya yaad hai|what have you remembered", re.I)
 STOP = {"the", "our", "is", "on", "at", "a", "an", "of", "for", "to", "and", "that", "this", "we", "us", "hai", "ki",
-        "ka", "ke", "me", "is", "are", "be", "will", "it", "what", "when", "how", "kab", "kya", "do", "you"}
+        "ka", "ke", "me", "are", "be", "will", "it", "what", "when", "how", "kab", "kya", "do", "you"}
 MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 
 EXTRACT_PROMPT = """Turn the user's request into one memory record. Today is {today}.
@@ -59,6 +61,9 @@ def parse_date(text: str, today: date | None = None) -> str | None:
     return None
 
 
+KINDS = ("deadline", "priority", "preference", "fact")
+
+
 def _fallback(fact: str) -> dict:
     when = parse_date(fact)
     low = fact.lower()
@@ -78,11 +83,18 @@ def remember(conn: sqlite3.Connection, text: str, llm: LLM | None = None, who: s
             reply = llm.chat([{"role": "system", "content": EXTRACT_PROMPT.format(today=date.today().isoformat())},
                               {"role": "user", "content": fact}], json_mode=True)
             data = extract_json(reply.text)
-            record.update({k: data[k] for k in ("fact", "kind", "subject", "date") if data.get(k)})
-            if record["date"] and not re.match(r"^\d{4}-\d{2}-\d{2}$", str(record["date"])):
-                record["date"] = parse_date(str(record["date"]))
-        except Exception:
-            pass
+            # The AI only tidies the record; its values are checked like any other input.
+            if isinstance(data.get("fact"), str) and 3 <= len(data["fact"].strip()) <= 300:
+                record["fact"] = data["fact"].strip()
+            if data.get("kind") in KINDS:
+                record["kind"] = data["kind"]
+            if isinstance(data.get("subject"), str) and data["subject"].strip():
+                record["subject"] = data["subject"].strip()[:80]
+            if data.get("date"):
+                record["date"] = str(data["date"]) if re.match(r"^\d{4}-\d{2}-\d{2}$", str(data["date"])) \
+                    else parse_date(str(data["date"]))
+        except Exception as exc:   # no AI, or an unusable reply: the rule-based record is still correct
+            log.warning("Memory extraction by AI failed (%s); using the rule-based record", type(exc).__name__)
     replaced = []
     with conn:
         for old in conn.execute("SELECT id, fact, subject FROM memory WHERE active = 1 AND kind = ?", (record["kind"],)):

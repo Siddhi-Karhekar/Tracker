@@ -9,3 +9,5 @@ __pycache__/
 *.db-shm
 *_chroma/
 .streamlit/secrets.toml
+.ruff_cache/
+.coverage

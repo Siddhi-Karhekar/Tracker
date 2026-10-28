@@ -7,11 +7,18 @@ attempt raises auth.PermissionDenied and is written to the audit log.
 from __future__ import annotations
 
 import json
-import sqlite3
+import logging
+import threading
 from datetime import timedelta
 
 from teampulse import auth, config
-from teampulse.auth import Actor, AuthError, PermissionDenied, audit, iso, now, require
+from teampulse.auth import Actor, AuthError, audit, iso, now, require
+
+log = logging.getLogger("teampulse.actions")
+
+
+class ServiceError(AuthError):
+    """Something on our side failed. The message is safe to show; the details go to the server log."""
 
 
 class RateLimited(AuthError):
@@ -102,10 +109,19 @@ def scan_chat(conn, actor: Actor, classifier, index, rescan: bool = False) -> di
     return stats
 
 
+_first_build_lock = threading.Lock()
+
+
 def first_build(conn, index, llm) -> None:
-    """Automatic, once, when a database has never been processed. Changes no one's data, so any viewer may start it."""
+    """Automatic, once, when a database has never been processed. Changes no one's data, so any viewer may start it.
+
+    If several people open the app at that moment, one builds and the others wait for it, instead of each
+    starting the same AI-heavy build."""
     from teampulse import discrepancies
-    discrepancies.run(conn, index, llm, refresh=True)
+    with _first_build_lock:
+        if conn.execute("SELECT 1 FROM sync_state WHERE key = 'tasks:refreshed_at'").fetchone():
+            return   # someone else finished it while we waited
+        discrepancies.run(conn, index, llm, refresh=True)
 
 
 # ---- data edits ----------------------------------------------------------------------------------------
@@ -207,10 +223,29 @@ def ask(conn, actor: Actor, agent, question: str, history: list[dict]) -> dict:
     """Questions are open to every role, but rate-limited per person, and team memory stays leader-only."""
     require(conn, actor, "ask")
     question = question.strip()[:1000]
-    recent = conn.execute("SELECT COUNT(*) FROM audit_log WHERE actor_id = ? AND action = 'ask' AND outcome = 'ok' "
+    recent = conn.execute("SELECT COUNT(*) FROM audit_log WHERE actor_id = ? AND action = 'ask' AND outcome IN ('ok', 'failed') "
                           "AND at >= ?", (actor.id, iso(now() - timedelta(hours=1)))).fetchone()[0]
     if recent >= ask_limit():
         audit(conn, actor, "ask", outcome="denied", detail="rate limit")
         raise RateLimited(f"You've asked {ask_limit()} questions in the last hour. Try again a little later.")
-    audit(conn, actor, "ask")   # the question text itself is not logged
-    return agent.ask(question, history=history, allow_memory_write=auth.can(actor, "memory.write"))
+    if not question:
+        raise auth.AuthError("Type a question first.")
+    try:
+        result = agent.ask(question, history=history, allow_memory_write=auth.can(actor, "memory.write"),
+                           allowed_specialists=allowed_specialists(conn, actor))
+    except Exception as exc:   # search index, database or an unexpected AI reply: log it, don't show internals
+        log.exception("Answering a question failed")
+        audit(conn, actor, "ask", outcome="failed", detail=type(exc).__name__)
+        raise ServiceError("Something went wrong while answering. Please try again; if it keeps happening, tell "
+                           "your team leader (the details are in the server log).") from exc
+    audit(conn, actor, "ask")   # counted once answered; the question text itself is never logged
+    return result
+
+
+# Which page holds each specialist's information. Asking must not reach what the page would not show.
+SPECIALIST_PAGE = {"blockers": "blockers", "discrepancies": "conflicts", "contributions": "contributions",
+                   "memory": "memory", "retrieval": "ask"}
+
+
+def allowed_specialists(conn, actor: Actor) -> list[str]:
+    return [name for name, page in SPECIALIST_PAGE.items() if auth.page_allowed(conn, actor, page)]

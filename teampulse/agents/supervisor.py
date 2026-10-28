@@ -78,6 +78,7 @@ class SupervisorState(TypedDict, total=False):
     memories: list[dict]         # remembered facts relevant to the question, each checked against live data
     verification: dict           # Verifier result: per-statement verdicts + faithfulness
     allow_memory_write: bool     # False for read-only users: memory commands are refused, whoever routed them
+    allowed_specialists: list | None   # None = all. Specialists behind pages the person can't open are refused.
 
 
 def _step(state, name: str, started: float, **detail) -> list[dict]:
@@ -219,7 +220,14 @@ class SupervisorAgent:
             started = time.time()
             writes_memory = part["specialist"] == "memory" and (
                 memory.REMEMBER_RE.match(part["question"]) or memory.FORGET_RE.match(part["question"]))
-            if writes_memory and not state.get("allow_memory_write", True):
+            allowed = state.get("allowed_specialists")
+            if allowed is not None and part["specialist"] not in allowed:
+                # Enforced here, after routing, so neither the AI router nor the wording of a question can
+                # reach information behind a page the team leader has closed to this person.
+                result = {"answer": "That information is on a page your team leader hasn't opened to you, so I "
+                                    "can't answer it here.", "evidence": [], "cited": [], "warnings": [],
+                          "provider": "refused", "trace": [{"step": "specialist_refused", "ms": 0}]}
+            elif writes_memory and not state.get("allow_memory_write", True):
                 result = {"answer": "Only the team leader can change team memory. You can still ask what's "
                                     "remembered.", "evidence": [], "cited": [], "warnings": [], "provider": "memory",
                           "trace": [{"step": "memory_write_refused", "ms": 0}]}
@@ -261,7 +269,8 @@ class SupervisorAgent:
         """Check each cited statement against the evidence it cites (one AI call; skipped for templates)."""
         started = time.time()
         provider = (state.get("provider") or "").split(" ")[0]
-        if not self.verify_answers or not state.get("cited") or provider in ("template", "none", "memory", "error", "fallback"):
+        if not self.verify_answers or not state.get("cited") or provider in (
+                "template", "none", "memory", "error", "fallback", "refused"):
             return {}
         result = verifier.verify(state["answer"], state["evidence"], self.llm)
         warnings = list(state.get("warnings", []))
@@ -275,7 +284,9 @@ class SupervisorAgent:
     def recall(self, state: SupervisorState) -> SupervisorState:
         """Attach remembered facts relevant to the question, each re-checked against live data."""
         started = time.time()
-        if any(p["specialist"] == "memory" for p in state["route"]["parts"]):
+        allowed = state.get("allowed_specialists")
+        if any(p["specialist"] == "memory" for p in state["route"]["parts"]) or (
+                allowed is not None and "memory" not in allowed):
             return {"memories": []}
         found = []
         for mem in memory.relevant(self.conn, state["route"]["standalone_question"]):
@@ -303,9 +314,11 @@ class SupervisorAgent:
         graph.add_edge("recall", END)
         return graph.compile()
 
-    def ask(self, question: str, history: list[dict] | None = None, allow_memory_write: bool = True) -> SupervisorState:
+    def ask(self, question: str, history: list[dict] | None = None, allow_memory_write: bool = True,
+            allowed_specialists: list | None = None) -> SupervisorState:
         return self.graph.invoke({"question": question, "history": history or [], "trace": [], "warnings": [],
-                                  "allow_memory_write": allow_memory_write})
+                                  "allow_memory_write": allow_memory_write,
+                                  "allowed_specialists": allowed_specialists})
 
 
 def main():

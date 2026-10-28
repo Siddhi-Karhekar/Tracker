@@ -7,9 +7,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-import requests
 
-from teampulse import config, db
+from teampulse import config, db, http
 from teampulse.models import Event, issue_refs, to_iso
 
 log = logging.getLogger("teampulse.notion")
@@ -120,7 +119,7 @@ def page_to_event(page: dict, body: str, channel: str) -> Event:
 
 class NotionClient:
     def __init__(self, token: str):
-        self.session = requests.Session()
+        self.session = http.session()   # retries 429 / 5xx with backoff
         self.session.headers.update({
             "Authorization": f"Bearer {token}",
             "Notion-Version": NOTION_VERSION,

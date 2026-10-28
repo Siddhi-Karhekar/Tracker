@@ -57,7 +57,7 @@ def _side(conn, claim: dict, label: str | None = None) -> dict:
 
 
 def _id(kind: str, task: str, values) -> str:
-    return hashlib.sha1(json.dumps([kind, task, sorted(map(str, values))]).encode()).hexdigest()[:16]
+    return hashlib.sha1(json.dumps([kind, task, sorted(map(str, values))]).encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 def _days(iso: str) -> int:
@@ -258,7 +258,8 @@ def open_items(conn: sqlite3.Connection, include: tuple = ("open",)) -> list[dic
 
 def set_verdict(conn: sqlite3.Connection, discrepancy_id: str, verdict: str, who: str = "", note: str = "") -> None:
     """People's judgement. 'false_alarm' also dismisses it (it won't come back while the values are the same)."""
-    assert verdict in ("real", "false_alarm")
+    if verdict not in ("real", "false_alarm"):   # a real check: asserts vanish under python -O
+        raise ValueError(f"Unknown verdict: {verdict!r}")
     with conn:
         conn.execute("UPDATE discrepancies SET verdict=?, dismissed_by=?, note=?, "
                      "state=CASE WHEN ?='false_alarm' THEN 'dismissed' ELSE state END WHERE id=?",

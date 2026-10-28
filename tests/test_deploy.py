@@ -44,7 +44,7 @@ def _app(tmp_path, monkeypatch, demo: bool, limit: int = 15):
 
 def test_public_demo_banner_home_and_limit(tmp_path, monkeypatch):
     app = _app(tmp_path, monkeypatch, demo=True, limit=1)
-    assert any("Public demo" in i.value for i in app.info)
+    assert sum("Public demo" in i.value for i in app.info) == 1   # regression: it used to appear three times
     home = " ".join(m.value for m in app.markdown)
     assert "marked done in Notion" in home and "Also: 4 more source conflicts, 2 open blockers" in home
     ask = AppTest.from_file(os.path.join(ROOT, "views", "ask.py"), default_timeout=90)

@@ -192,3 +192,14 @@ def test_leader_pages_show_editing_controls(team):
     assert "Rebuild tasks" in labels(page("views/tasks.py", token))
     assert len(page("views/tasks.py", token).tabs) == 2
     assert "Run check" in labels(page("views/sources.py", token))
+
+
+def test_public_demo_team_page_is_look_only(team, monkeypatch):
+    from datetime import datetime, timezone
+    db.set_state(team, "demo:seeded_at", datetime.now(timezone.utc).isoformat())   # don't let the demo re-seed
+    monkeypatch.setenv("TEAMPULSE_PUBLIC_DEMO", "on")
+    token = auth.login(team, "neha", LEADER_PW)[0]
+    at = page("views/team.py", token)
+    assert "switched off in the public demo" in " ".join(i.value for i in at.info)
+    assert all(b.disabled for b in at.button if b.label in ("Create account", "Reset password", "Deactivate", "Save"))
+    assert any(b.label == "Reset password" for b in at.button)

@@ -3,7 +3,7 @@ import json
 
 import streamlit as st
 
-from teampulse import actions, auth, ui
+from teampulse import actions, ui
 from teampulse.signals import TYPES, build_windows, load_messages
 from teampulse.webapp import get_agent, require_page
 

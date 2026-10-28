@@ -16,6 +16,13 @@ log = logging.getLogger("teampulse.poll")
 
 
 def run_once(conn, scan_chat: bool = False, state: dict | None = None) -> None:
+    state = state if state is not None else {}
+    db.beat(conn, "poller")
+    try:
+        from teampulse import maintenance
+        maintenance.daily(conn, state)   # retention purge; daily backup if TEAMPULSE_BACKUP_DIR is set
+    except Exception as exc:
+        log.error("Maintenance failed: %s", exc)
     for name, poller in (("GitHub", github_poller), ("Notion", notion_poller)):
         try:
             poller.poll_all(conn)
@@ -27,7 +34,6 @@ def run_once(conn, scan_chat: bool = False, state: dict | None = None) -> None:
             from teampulse.index import EventIndex
             from teampulse.llm import LLM
 
-            state = state if state is not None else {}
             index = state.setdefault("index", EventIndex(conn))   # load the model once, reuse every pass
             # scan chat → task registry → AI chat links → claims → discrepancies (all incremental / cached)
             stats = discrepancies.run(conn, index, LLM(conn), refresh=True)

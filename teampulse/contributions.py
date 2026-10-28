@@ -15,7 +15,6 @@ Design principles (say these in your report and viva):
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -75,7 +74,8 @@ def get_review(conn, name: str) -> dict | None:
 
 
 def set_review(conn, name: str, status: str, comment: str = "") -> None:
-    assert status in ("approved", "disputed")
+    if status not in ("approved", "disputed"):
+        raise ValueError(f"Unknown review status: {status!r}")
     with conn:
         conn.execute("INSERT OR REPLACE INTO contribution_reviews VALUES (?, ?, ?, ?)",
                      (name, status, comment.strip() or None, utc_now()))

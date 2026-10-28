@@ -33,6 +33,8 @@ teampulse/
   config.py                reads .env
   auth.py                  accounts, salted password hashes, sessions, roles and permissions; CLI
   actions.py               the only way pages change data: checks the role on the server first
+  maintenance.py           retention purge, verified backups and restore
+  http.py                  retrying HTTP sessions for the GitHub and Notion pollers
   cli.py                   stats / recent / members / link
   signals.py               chat scanner: conversation windows → classify → link to tasks
   webapp.py                shared Streamlit helpers + public demo mode
@@ -64,8 +66,11 @@ teampulse/
     github_poller.py       issues, PRs, commits, comments, reviews
     notion_poller.py       task databases + plan pages (incl. page text and to-do checkboxes)
     poll.py                runs GitHub + Notion pollers on a loop
-tests/                     113 offline tests (no API keys or internet needed)
+tests/                     offline tests (no API keys or internet needed)
 SECURITY.md                how accounts and roles work, and both pre-launch security checklists
+AUDIT.md                   production-readiness audit: findings, fixes, tests, deployment checklist, open risks
+requirements.lock          exact versions of every package, for reproducible installs
+.github/workflows/ci.yml   tests, lint and dependency scan on every push
 ```
 
 ## 1. Quick start with demo data (10 minutes)
@@ -75,7 +80,7 @@ python -m venv .venv
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env                   # Windows: copy .env.example .env
-python -m pytest -q                    # 113 passed
+python -m pytest -q                    # all should pass
 python -m teampulse.seed_demo          # creates data/demo.db + data/demo_answer_key.json
                                        # and prints sign-in details for Neha (leader) and Kabir (member)
 ```
@@ -224,6 +229,20 @@ Roles are checked on the server for every change, not just by hiding buttons. Ot
 `python -m teampulse.auth list` and `python -m teampulse.auth reset <username>` (if a leader is locked out).
 `TEAMPULSE_AUTH=off` turns sign-in off for development on your own laptop only. Details and the security
 checklists: [SECURITY.md](SECURITY.md).
+
+## Running it for real
+
+Install the exact tested versions with `pip install -r requirements.lock` (use `requirements.txt` only when you
+mean to upgrade). Then follow the deployment checklist in [AUDIT.md](AUDIT.md#e-production-deployment-checklist).
+Day-to-day commands:
+
+```bash
+python -m teampulse.health status        # are the poller and bot alive? exit code 1 if not (for uptime checks)
+python -m teampulse.maintenance backup   # verified copy in data/backups (the poll loop does this daily if
+                                         # TEAMPULSE_BACKUP_DIR is set)
+python -m teampulse.maintenance restore data/backups/teampulse-<time>.db --yes   # stop everything first
+python -m teampulse.maintenance purge    # retention clean-up (also runs automatically)
+```
 
 ## Deploy a free public demo (Week 10)
 

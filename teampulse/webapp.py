@@ -21,8 +21,7 @@ TYPE_BADGE = {"blocker": "🚧 Blocker", "help_request": "🙋 Help request", "d
 RESEED_HOURS = 20
 
 
-def public_demo() -> bool:
-    return (config.get("TEAMPULSE_PUBLIC_DEMO", "off") or "off").lower() == "on"
+public_demo = auth.public_demo   # one definition, used by the pages and the permission checks
 
 
 def demo_question_limit() -> int:
@@ -59,6 +58,8 @@ def _agent(db_path: str, demo: bool) -> SupervisorAgent:
     tracing.setup()   # no-op unless TEAMPULSE_TRACING=phoenix
     seeded = ensure_demo(db_path) if demo else False
     agent = SupervisorAgent(db.connect(db_path))
+    from teampulse import maintenance
+    maintenance.purge(agent.conn)   # retention: old sessions, activity log and AI cache (also run by the poll loop)
     agent.index.sync()
     if seeded:   # prepare chat labels, tasks, claims and discrepancies so every page has content immediately
         from teampulse import discrepancies
@@ -70,10 +71,7 @@ def _agent(db_path: str, demo: bool) -> SupervisorAgent:
 
 def get_agent() -> SupervisorAgent:
     demo = public_demo()
-    agent = _agent(_demo_db_path(), demo)
-    if demo:
-        banner()
-    return agent
+    return _agent(_demo_db_path(), demo)
 
 
 def banner():
@@ -141,6 +139,8 @@ def require_page(page: str) -> auth.Actor:
     if actor is None:
         ui.empty("Please sign in.", "Your session has ended or you haven't signed in yet.")
         st.stop()
+    if public_demo():
+        banner()   # here, once per page; get_agent() runs several times per page load
     if not auth.page_allowed(agent.conn, actor, page):
         auth.audit(agent.conn, actor, "page.open", page, "denied")
         ui.empty("You don't have access to this page.", "Your team leader decides which pages team members can open.")

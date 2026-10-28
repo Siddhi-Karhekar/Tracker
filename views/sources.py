@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import actions, auth, config, ui
+from teampulse import actions, auth, config, health, ui
 from teampulse.webapp import get_agent, public_demo, require_page
 
 actor = require_page("sources")
@@ -14,12 +14,21 @@ ui.header("Data sources", "Where TeamPulse reads from, how fresh each source is,
 SOURCES = [("github", "GitHub", "GITHUB_TOKEN", "Issues, pull requests, commits and reviews, every few minutes."),
            ("notion", "Notion", "NOTION_TOKEN", "Task database and plan pages, every few minutes."),
            ("discord", "Discord", "DISCORD_BOT_TOKEN", "Team chat as it happens, from members who opted in.")]
+
+
+PROCESS = {"github": "poller", "notion": "poller", "discord": "discord"}
+running = health.process_status(conn)
 cols = st.columns(3, gap="medium")
 for col, (key, name, env, what) in zip(cols, SOURCES):
     count, latest = conn.execute("SELECT COUNT(*), MAX(updated_at) FROM events WHERE source = ?", (key,)).fetchone()
     configured = bool(config.get(env)) and not public_demo()
-    if configured:
+    process = running[PROCESS[key]]
+    if configured and process["state"] == "ok":
         dot, state = ui.AGREE, "Connected"
+    elif configured:   # a token alone doesn't mean data is flowing: the poller or bot must be running
+        how = "the bot" if key == "discord" else "the poller"
+        dot, state = ui.STALE, (
+            f"Not running: {how} hasn't checked in" + (f" since {ui.ago(process['last'])}" if process["last"] else " yet"))
     elif count:
         dot, state = ui.ACCENT, "Demo data" if public_demo() or "demo" in config.DB_PATH else "Stored data only"
     else:

@@ -1,12 +1,12 @@
 """Sign in. Also creates the very first team leader, but only with the setup code from the server's settings."""
-import hmac
-
 import streamlit as st
 
 from teampulse import auth, config, ui, webapp
 
 agent = webapp.get_agent()
 conn = agent.conn
+if webapp.public_demo():
+    webapp.banner()
 
 left, _ = st.columns([2, 1])
 with left:
@@ -56,14 +56,11 @@ with left:
                 pw1 = st.text_input("Choose a password", type="password", autocomplete="new-password")
                 pw2 = st.text_input("Type it again", type="password", autocomplete="new-password")
                 if st.form_submit_button("Create team leader account", type="primary"):
-                    if not hmac.compare_digest(code.encode(), setup_code.encode()):
-                        auth.audit(conn, None, "account.create_first_leader", "", "denied", "wrong setup code")
-                        st.error("That setup code isn't right.")
-                    elif pw1 != pw2:
-                        st.error("The two passwords don't match.")
-                    else:
-                        try:
-                            u, _ = auth.create_first_leader(conn, name, new_user or None, pw1, must_change=False)
-                            st.success(f"Team leader account {u} created. Sign in above.")
-                        except auth.AuthError as exc:
-                            st.error(str(exc))
+                    try:
+                        auth.check_setup_code(conn, code, setup_code)   # throttled, minimum length enforced
+                        if pw1 != pw2:
+                            raise auth.AuthError("The two passwords don't match.")
+                        u, _ = auth.create_first_leader(conn, name, new_user or None, pw1, must_change=False)
+                        st.success(f"Team leader account {u} created. Sign in above.")
+                    except auth.AuthError as exc:
+                        st.error(str(exc))

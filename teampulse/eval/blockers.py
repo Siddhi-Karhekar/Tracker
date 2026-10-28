@@ -82,7 +82,7 @@ def metrics(gold: dict[str, str], pred: dict[str, str]) -> dict:
 
 
 def to_markdown(results: dict[str, dict], data_name: str, texts: dict[str, str]) -> str:
-    lines = [f"# Chat classifier evaluation", "", f"Data: `{data_name}` · {datetime.now():%Y-%m-%d %H:%M}", ""]
+    lines = ["# Chat classifier evaluation", "", f"Data: `{data_name}` · {datetime.now():%Y-%m-%d %H:%M}", ""]
     lines += ["| Classifier | Messages | Accuracy | Macro F1 | Blocker P | Blocker R | Blocker F1 |",
               "|---|---|---|---|---|---|---|"]
     for name, m in results.items():

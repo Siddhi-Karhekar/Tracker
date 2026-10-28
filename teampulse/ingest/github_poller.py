@@ -5,9 +5,8 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-import requests
 
-from teampulse import config, db
+from teampulse import config, db, http
 from teampulse.models import Event, issue_refs, to_iso
 
 log = logging.getLogger("teampulse.github")
@@ -113,7 +112,7 @@ def review_to_event(item: dict, repo: str, pr_number: int) -> Event:
 
 class GitHubClient:
     def __init__(self, token: str):
-        self.session = requests.Session()
+        self.session = http.session()   # retries 429 / 5xx with backoff
         self.session.headers.update({
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",

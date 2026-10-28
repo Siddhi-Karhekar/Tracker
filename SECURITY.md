@@ -4,7 +4,8 @@ TeamPulse reads a student team's GitHub, Notion and Discord. Anyone on the team,
 issue on a public repo, controls some of the text it shows, so that text is treated as hostile everywhere.
 
 This file covers how accounts and roles work, then goes through two common pre-launch checklists item by item:
-what was fixed, what was already handled, and what doesn't apply (and why).
+what was fixed, what was already handled, and what doesn't apply (and why). The full audit, with every finding,
+its test and the risks that remain, is in [AUDIT.md](AUDIT.md).
 
 ## Accounts and roles
 
@@ -62,10 +63,10 @@ edits, with who and when. Passwords and message text are never logged.
 | 2 | API keys in the frontend | **Handled.** All keys are read on the server (`teampulse/config.py`). Streamlit sends rendered pages, not code or keys, to the browser. Keys are never displayed; Data sources only shows "set / not set". |
 | 3 | No row-level security | **Not applicable as such.** The browser never talks to the database; there's no Supabase/Firebase client. The equivalent, server-side permission checks per action and per record, is in `actions.py`. |
 | 4 | Frontend-only permissions | **Fixed.** Every write checks the role on the server (`auth.require`). Pages check access on the server (`require_page`). Tested by calling admin actions directly as a member. |
-| 5 | No rate limiting | **Fixed.** Sign-in: 5 failures then a 15-minute lock per username. AI questions: 60 per person per hour (`TEAMPULSE_ASK_PER_HOUR`), which also protects your free LLM quota. |
+| 5 | No rate limiting | **Fixed.** Sign-in, password changes and the setup code: 5 failures then a 15-minute lock, counted atomically so parallel guesses can't dodge it. AI questions: 60 per person per hour (`TEAMPULSE_ASK_PER_HOUR`), and every AI reply is capped (`TEAMPULSE_LLM_MAX_TOKENS`), which also protects your free quota. |
 | 6 | SQL string concatenation | **Handled.** Every query uses `?` placeholders. The few f-strings in SQL only insert fixed column lists or placeholder counts written in the code, never user input. |
 | 7 | No input validation | **Fixed.** Names, usernames (`^[a-z][a-z0-9._-]{2,31}$`), roles, passwords, labels, memory facts, review notes and page lists are validated and length-limited on the server; form fields also have `max_chars`. |
-| 8 | User content as raw HTML | **Fixed.** Every value from GitHub, Notion, Discord or a person goes through `ui.e()`, which escapes HTML *and* Markdown (so hostile text can't become a link, image, or Streamlit colour/LaTeX directive). Links only allow `http(s)://` (`ui.url`), so `javascript:` links become dead links. AI answers have embedded images stripped. `tests/test_xss.py` fills every table with attack strings and renders all 10 pages. |
+| 8 | User content as raw HTML | **Fixed.** Every value from GitHub, Notion, Discord or a person goes through `ui.e()`, which escapes HTML *and* Markdown (so hostile text can't become a link, image, or Streamlit colour/LaTeX directive). Links only allow `http(s)://` (`ui.url`), so `javascript:` links become dead links. In AI answers, embedded images are dropped and links the AI writes are shown as plain "label (address)", so a chat message can't turn into a disguised phishing link; only TeamPulse's own citation links are clickable. `tests/test_xss.py` fills every table with attack strings and renders all 10 pages. |
 | 9 | Plain-text passwords | **Fixed.** Salted scrypt hashes; one-time passwords are shown once and never stored. |
 | 10 | Auth token in local storage | **Fixed.** Tokens stay in the server-side session; the database stores only their hash. |
 | 11 | Open admin panel / OAuth admin | **Fixed.** Team & access and Label chat are leader-only on the server. There's no OAuth sign-in to misconfigure. |
@@ -75,7 +76,7 @@ edits, with who and when. Passwords and message text are never logged.
 | 15 | Saving the whole request body | **Handled.** Each action takes named, validated arguments. A member's "own report" is taken from their account, not from a form field, so it can't be swapped. |
 | 16 | Webhook signature checks | **Not applicable.** TeamPulse polls GitHub and Notion and uses a Discord bot; it exposes no webhooks. |
 | 17 | Production stack traces | **Fixed.** `showErrorDetails = "none"`: visitors see a generic error; details go to the server log only. |
-| 18 | Outdated dependencies | **Checked.** `pip-audit -r requirements.txt` flags 5 advisories in ChromaDB 1.5.9 (no fixed version yet). All five are in Chroma's **HTTP server** (`/api/v2/...` endpoints and its server RBAC). TeamPulse uses Chroma embedded (`PersistentClient`), so no Chroma server or port exists. Re-run `pip-audit` before each release and upgrade when a fix ships. |
+| 18 | Outdated dependencies | **Checked.** Exact versions of all 482 packages are pinned in `requirements.lock`, and CI (`.github/workflows/ci.yml`) runs `pip-audit` on it. It flags 5 advisories in ChromaDB 1.5.9 (no fixed version yet). All five are in Chroma's **HTTP server** (`/api/v2/...` endpoints and its server RBAC). TeamPulse uses Chroma embedded (`PersistentClient`), so no Chroma server or port exists. Re-run `pip-audit` before each release and upgrade when a fix ships. |
 | 19 | Weak passwords | **Fixed.** Length, common-password and variety rules (see above). |
 | 20 | File upload validation | **Not applicable.** There are no uploads; `maxUploadSize` is also set to 1 MB as a backstop. |
 
@@ -102,7 +103,7 @@ edits, with who and when. Passwords and message text are never logged.
 | 17 | Trim API responses | No public API. Members don't see the identity table (who is who on GitHub/Discord) or the connection details. |
 | 18 | Security headers | Streamlit doesn't let an app set its own headers (e.g. Content-Security-Policy). Streamlit Community Cloud serves over HTTPS. Escaping (1.8) is the main defence against injected scripts. |
 | 19 | Force HTTPS | Streamlit Community Cloud forces HTTPS. If you self-host, put it behind a reverse proxy with HTTPS (e.g. Caddy). |
-| 20 | Scan dependencies | Done with `pip-audit` (see 1.18). |
+| 20 | Scan dependencies | Done with `pip-audit` on the full lock file, in CI on every push (see 1.18). |
 
 ## Settings
 
@@ -114,16 +115,24 @@ edits, with who and when. Passwords and message text are never logged.
 | `TEAMPULSE_IDLE_MINUTES` | `60` | Sign out after this long without activity. |
 | `TEAMPULSE_ASK_PER_HOUR` | `60` | AI questions per person per hour. |
 | `TEAMPULSE_CONTRIB_REVIEW` | `on` | `off` makes members strictly read-only (no report approval). |
-| `TEAMPULSE_PUBLIC_DEMO` | `off` | `on` adds one-click demo sign-ins for the fictional team. Never use with real data. |
+| `TEAMPULSE_PUBLIC_DEMO` | `off` | `on` adds one-click demo sign-ins for the fictional team, and switches off account, settings, connection-check and evaluation changes so one visitor can't change them for everyone. Never use with real data. |
+| `TEAMPULSE_LLM_MAX_TOKENS` | `1500` | Longest AI reply. |
+| `TEAMPULSE_AUDIT_DAYS` / `TEAMPULSE_CACHE_DAYS` | `180` / `30` | Retention for the activity log and cached AI responses. |
+| `TEAMPULSE_BACKUP_DIR` / `TEAMPULSE_BACKUP_KEEP` | empty / `14` | Daily verified backups from the poll loop. |
 
 ## Tests
 
-`python -m pytest -q` runs 113 offline tests, including:
+`python -m pytest -q` runs the offline test suite, including:
 
 - `tests/test_auth.py`: hashing, password rules, lockout, sessions and expiry, sign-out, deactivation,
   one-time passwords, and a member calling all 16 admin actions directly (each refused, logged, no change).
 - `tests/test_roles_ui.py`: both roles through the real pages: what each sees, hidden pages, account management.
 - `tests/test_xss.py`: attack strings in every table, rendered on every page.
+- `tests/test_concurrency.py`: simultaneous users can't corrupt each other's changes, parallel password guesses
+  still lock the account, and only one first leader can be created.
+- `tests/test_privacy.py`: opting out of Discord deletes the person's messages and every copy derived from them.
+- `tests/test_llm_safety.py`: AI calls are capped and warned about injected instructions; AI text can't carry
+  disguised links or images.
 
 ## Reporting a problem
 

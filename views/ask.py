@@ -63,7 +63,7 @@ def render_result(result: dict):
     evidence = result.get("evidence", [])
     st.markdown(linkify(result["answer"], evidence))
     for warning in result.get("warnings", []):
-        st.warning(warning)
+        st.warning(ui.md_safe(warning))
     notes = []
     check = result.get("verification") or {}
     if check.get("statements"):
@@ -116,7 +116,7 @@ if not st.session_state.history:
 
 for item in st.session_state.history:
     with st.chat_message("user"):
-        st.markdown(item["question"])
+        st.markdown(ui.md_safe(item["question"]))
     with st.chat_message("assistant"):
         render_result(item["result"])
 
@@ -127,7 +127,7 @@ if question and public_demo() and len(st.session_state.history) >= demo_question
     question = None
 if question:
     with st.chat_message("user"):
-        st.markdown(question)
+        st.markdown(ui.md_safe(question))
     with st.chat_message("assistant"):
         with st.spinner("Reading GitHub, Notion and chat…"):
             history = [{"question": h["question"], "answer": h["result"]["answer"]} for h in st.session_state.history]
