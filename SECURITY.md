@@ -19,13 +19,23 @@ its test and the risks that remain, is in [AUDIT.md](AUDIT.md).
 | Give verdicts, fix chat links, label chat | ✅ | ❌ |
 | Add or remove team memory | ✅ | ❌ (even when asked through the chat box) |
 | Data sources page, connection check, evaluation | ✅ | ❌ |
-| Approve or dispute **their own** contribution report | ✅ | ✅ (only exception; `TEAMPULSE_CONTRIB_REVIEW=off` removes it) |
+| Approve or dispute **their own** contribution report | ✅ | ✅ (`TEAMPULSE_CONTRIB_REVIEW=off` removes it) |
+| Project management: create projects and tasks, assign, edit deadlines, approve requests, mark Completed, archive | ✅ | ❌ |
+| Project management: **tasks assigned to them**: status up to Under review, progress, subtasks, blockers, deadline requests | ✅ | ✅ |
+| Comment on any task | ✅ | ✅ (rate limited) |
+| My work (own workspace), Project board | ✅ (any workspace) | ✅ (own workspace only) |
+| Team dashboard | ✅ | ❌ |
 
-The one exception is deliberate: a contribution report about a person should not be visible to the team until
-that person has seen it. It only works on the member's own report and is logged.
+Members may change only two things: their own contribution report and the tasks assigned to them. A
+contribution report about a person should not be visible to the team until that person has seen it. And the
+person doing the work is the one who knows its status. Both rules check *whose* item it is on the server, and
+both are logged. Project-management checks live in `teampulse/pm.py` (full matrix in
+[docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md#4-permission-matrix)). Each person is limited to 120 project changes
+per 10 minutes, and two people saving the same task at once can't overwrite each other: the later save is
+refused and asked to reload.
 
 **Where it's enforced.** Streamlit runs every page on the server; there is no separate API a browser could call.
-Every change goes through `teampulse/actions.py`, and each function there checks the signed-in account with
+Every change goes through `teampulse/actions.py` (or `teampulse/pm.py` for projects and tasks), and each function there checks the signed-in account with
 `auth.require()` *before* touching the database. Hidden buttons are a convenience, not the protection: the tests
 call every admin action directly as a member and check that each one is refused, logged, and changes nothing.
 

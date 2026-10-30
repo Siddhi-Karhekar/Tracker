@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/Siddhi-Karhekar/Tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Siddhi-Karhekar/Tracker/actions/workflows/ci.yml)
 
-**A multi-agent AI assistant for student project teams.** TeamPulse reads a team's **GitHub**, **Notion** and
+**A multi-agent AI assistant and project manager for student project teams.** Teams plan and run their work in
+TeamPulse (projects, tasks, a personal workspace for every member, a dashboard for the leader). TeamPulse also reads a team's **GitHub**, **Notion** and
 **Discord**. It shows where they disagree, pulls blockers out of Hinglish chat, and builds fair,
 evidence-based contribution reports. Every answer cites its sources. Everything runs on free tools and free AI
 tiers.
@@ -46,14 +47,26 @@ in Hinglish. The three drift apart, and nobody has time to cross-check them. Tea
 | **Blockers from Hinglish chat** | "OTP abhi bhi nahi aa raha", "canteen se data nahi mila", "re-review kar de" become *blocked*, *waiting for help* or *decision*, each linked to its task, marked open or resolved, with the replies that answer it. |
 | **Fair contribution reports** | Per person: code, reviews, planning and docs, chat updates and **helping others**, with every chat claim ("80% done") checked against evidence. No rankings or scores. Opt-in, and each person approves their own report before the team sees it. |
 
+**Project management (TeamPulse 2.0)**
+
+- **My work**: each member's personal section shows what's overdue, due soon, blocked, high priority, in
+  progress, under review and done, plus notifications and their deadline requests.
+- **Project board**: projects, milestones, tasks with several assignees, subtasks, dependencies, comments and
+  full history. Workflow: Backlog → To do → In progress → Under review → Completed, plus Blocked.
+- **Team dashboard** (leader): completion, workload per person (alphabetical, never ranked), at-risk work,
+  and what needs a decision (finished work to approve, deadline requests).
+- Members update their own tasks, report blockers, ask for a new deadline and comment. The leader plans,
+  assigns and marks work Completed. **Reported progress** is shown next to **measured progress** from subtasks.
+  Design, permission matrix and roadmap: [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
+
 **Also included**
 
 - **Ask**: questions in English or Hinglish ("kya sab sync me hai?") with cited answers, a check that each
   statement matches its source, and the agent's step-by-step trace.
 - **Team memory**: "remember that our final review is on 17 Nov". Remembered facts are re-checked against
   live data every time they're used.
-- **Accounts and roles**: a team leader (full control) and team members (read-only). Permissions are checked on
-  the server.
+- **Accounts and roles**: a team leader (full control) and team members (update their own tasks and comment;
+  everything else read-only). Permissions are checked on the server.
 - **Guardrails** on every AI answer, plus a full **evaluation suite** (per agent, RAGAS, LangSmith).
 
 ---
@@ -185,11 +198,14 @@ A canteen pre-order app built by **Riya** (frontend), **Aman** (backend), **Kabi
 
 | Page | What it shows |
 |---|---|
+| **My work** | Your personal workspace: counts, notifications, Focus (overdue, blocked, due soon, high priority), all your tasks, your deadline requests. Leaders can open anyone's |
+| **Project board** | Board and list of a project's tasks with filters; open a task to update it, tick subtasks, report a blocker, ask for a new deadline or comment. Leaders create projects, milestones and tasks here |
+| **Team dashboard** (leader) | Completion, workload, at-risk tasks, work to approve, deadline requests, milestones, activity |
 | **Home** | The single most important issue in plain words, a needs-attention list, recent activity, and the **sync strip**: each task with what GitHub, Notion and chat say |
 | **Ask** | Chat with cited answers, a "statements match their sources" check, guardrail notes and the agent trace |
 | **Blockers** | What people are stuck on or waiting for, linked to tasks, with open / resolved / possibly resolved |
 | **Conflicts** | Where sources disagree, both sides linked, severity, suggested fix; leaders mark real / false alarm |
-| **Tasks** | Every task's status / owner / deadline per source; leaders correct chat→task links |
+| **Source tasks** | Every GitHub issue / Notion task's status / owner / deadline per source; leaders correct chat→task links |
 | **Contributions** | Evidence-based reports; each member reviews, adds context and approves their own |
 | **Team & access** (leader) | Create accounts, one-time passwords, reset or deactivate, choose what members see, activity log |
 | **Data sources** (leader) | Freshness, whether the poller and bot are running, connection check with exact fixes, AI test |
@@ -211,10 +227,14 @@ There is no sign-up page: the **team leader** creates every account.
 
 | | Team leader | Team member |
 |---|---|---|
-| View pages and ask questions | All pages | Pages the leader allows, read-only |
+| View pages and ask questions | All pages | My work, Project board, and the pages the leader allows |
+| Plan: projects, tasks, assignments, deadlines, mark Completed | ✅ | ❌ |
+| Own tasks: status (up to Under review), progress, subtasks, blockers, deadline requests | ✅ | ✅ |
+| Comment on any task | ✅ | ✅ |
 | Accounts, data refresh, verdicts, labels, memory, settings | ✅ | ❌ |
 | Approve or dispute **own** contribution report | ✅ | ✅ (switch off with `TEAMPULSE_CONTRIB_REVIEW=off`) |
 
+The full project-management permission matrix is in [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md#4-permission-matrix).
 Roles are enforced on the server for every action. Hiding a page also hides it from the Ask chat. More in
 [SECURITY.md](SECURITY.md).
 
@@ -384,9 +404,10 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **191 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **223 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
-regression test for every bug found by real AI runs. CI runs them on every push: Linux (Python 3.12 and
+regression test for every bug found by real AI runs, and project management (permissions per role and per
+assignee, workflow rules, two people editing at once, both roles through the pages). CI runs them on every push: Linux (Python 3.12 and
 3.13), Windows, lint, dependency scan, and the RAGAS wiring check.
 
 ### Per-agent evaluation
@@ -555,8 +576,8 @@ All settings live in `.env` (copy `.env.example`). Only an AI key is needed for 
 
 ```
 app.py                      navigation; shows only the pages your role allows
-views/                      one file per page (home, ask, blockers, discrepancies, tasks, contributions,
-                            team, sources, memory, label, login, account)
+views/                      one file per page (home, ask, workspace, board, dashboard, blockers,
+                            discrepancies, tasks, contributions, team, sources, memory, label, login, account)
 teampulse/
   models.py                 Event: the one format every source becomes
   db.py                     SQLite schema, per-thread connections, deletion with derived copies, heartbeats
@@ -573,6 +594,7 @@ teampulse/
   guardrails.py             output checks on every answer
   agents/                   supervisor, retrieval, blockers, discrepancy, contributions, baseline (plain RAG)
   auth.py, actions.py       accounts, sessions, roles; the only write path (server-side checks)
+  pm.py, pm_ui.py           project management: rules and permission checks; task cards and task panel
   ui.py, webapp.py          design system, shared page helpers, public demo mode
   health.py                 connection checks and process status
   maintenance.py            retention purge, verified backup and restore
@@ -582,7 +604,8 @@ teampulse/
   seed_demo.py              the CampusEats demo team + answer key
 eval_data/                  18 golden questions (with reference answers), 60 Hinglish messages,
                             agent cases, thresholds
-tests/                      191 offline tests (+ tests/eval_env for the RAGAS environment)
+docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
+tests/                      223 offline tests (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment
@@ -621,19 +644,25 @@ SECURITY.md · AUDIT.md      security design and checklists · production-readin
   hosted tiers may train on prompts. Use Ollama for real data.
 - Notion's API reports only a page's **last** editor, so earlier editors aren't credited.
 - Streamlit can't send its own security headers. Self-hosting behind a reverse proxy adds them.
+- The board has no drag-and-drop (Streamlit doesn't support it natively); status changes go through the task
+  panel. Notifications are in the app only, with no email yet. One `@leaders` inbox is shared by all leaders.
 - Refreshing the browser tab signs you out, a deliberate trade-off to keep session tokens off the browser.
 
 ---
 
 ## 16. Status and next steps
 
-**Built:** ingestion from all three sources; five specialist agents and the Supervisor; Verifier; guardrails;
+**Built:** project management phase 1 (projects, tasks, My work, board, leader dashboard, permissions);
+ingestion from all three sources; five specialist agents and the Supervisor; Verifier; guardrails;
 the full web app with accounts and roles; security hardening and audit; per-agent evaluation with RAGAS and
 LangSmith; CI on Linux and Windows.
 
 **Next:**
-1. One full evaluation on `gpt-oss-120b` for the report (`python -m teampulse.eval.agents` +
+1. Project management phases 2–5: calendar and timeline views, GitHub/Notion sync for planned tasks, the AI
+   project manager (it proposes and the leader confirms), and proactive monitoring
+   ([roadmap](docs/TEAMPULSE_2.md#7-roadmap-later-rounds)).
+2. One full evaluation on `gpt-oss-120b` for the report (`python -m teampulse.eval.agents` +
    `python -m teampulse.eval.langsmith_eval`).
-2. Connect your real team (ideally with Ollama) and run it for 2–3 weeks.
-3. Label ~300 messages, correct ~100 links and give verdicts on conflicts. These give the real-world numbers.
-4. Deploy the public demo and record a backup demo video.
+3. Connect your real team (ideally with Ollama) and run it for 2–3 weeks.
+4. Label ~300 messages, correct ~100 links and give verdicts on conflicts. These give the real-world numbers.
+5. Deploy the public demo and record a backup demo video.

@@ -8,7 +8,8 @@ actor = webapp.require_page("team")
 conn = webapp.get_agent().conn
 
 ui.header("Team & access", "Create an account for each teammate, hand over their one-time password privately, "
-          "and choose what team members can see. Team members have view-only access.")
+          "and choose what team members can see. Team members update their own tasks and comment; everything "
+          "else is view-only for them.")
 
 
 def show_credentials():
@@ -85,8 +86,8 @@ with people:
                         st.error(str(exc))
 
 with visibility:
-    st.markdown("<p class='tp-meta'>Team members can open these pages, read-only. Label chat and this page are "
-                "always for leaders only.</p>", unsafe_allow_html=True)
+    st.markdown("<p class='tp-meta'>Team members can open these pages, read-only. My work and Project board are always "
+                "open to everyone; Label chat, Team dashboard and this page are always for leaders only.</p>", unsafe_allow_html=True)
     current = set(auth.member_pages(conn))
     with st.form("visibility"):
         chosen = [key for key, title in auth.PAGES.items() if st.checkbox(title, value=key in current, key=f"page-{key}")]

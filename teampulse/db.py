@@ -232,6 +232,108 @@ CREATE TABLE IF NOT EXISTS memory (
     created_at     TEXT NOT NULL,
     last_verified  TEXT
 );
+
+-- TeamPulse 2.0: project management. Tasks here are planned by the team in TeamPulse itself; the `tasks`
+-- table above is rebuilt from GitHub/Notion and is never edited by hand. Members are display names from
+-- `members` (the same names user accounts link to through users.member_name).
+CREATE TABLE IF NOT EXISTS pm_projects (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    start_date   TEXT,
+    end_date     TEXT,
+    archived     INTEGER NOT NULL DEFAULT 0,
+    created_by   TEXT,
+    created_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pm_milestones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES pm_projects(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    due_date    TEXT,
+    created_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pm_tasks (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id         INTEGER NOT NULL REFERENCES pm_projects(id) ON DELETE CASCADE,
+    parent_id          INTEGER REFERENCES pm_tasks(id) ON DELETE CASCADE,   -- set for subtasks
+    milestone_id       INTEGER REFERENCES pm_milestones(id) ON DELETE SET NULL,
+    title              TEXT NOT NULL,
+    description        TEXT NOT NULL DEFAULT '',
+    priority           TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    status             TEXT NOT NULL DEFAULT 'todo'
+                       CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'blocked', 'done')),
+    reported_progress  INTEGER NOT NULL DEFAULT 0 CHECK (reported_progress BETWEEN 0 AND 100),
+    estimate_hours     REAL,
+    blocked_reason     TEXT,
+    start_date         TEXT,
+    due_date           TEXT,
+    completed_at       TEXT,
+    archived           INTEGER NOT NULL DEFAULT 0,
+    created_by         TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    version            INTEGER NOT NULL DEFAULT 1        -- optimistic locking: two people editing at once
+);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_project ON pm_tasks(project_id, parent_id, status);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_due ON pm_tasks(due_date);
+CREATE TABLE IF NOT EXISTS pm_assignees (
+    task_id  INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    member   TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (task_id, member)
+);
+CREATE INDEX IF NOT EXISTS idx_pm_assignees_member ON pm_assignees(member);
+CREATE TABLE IF NOT EXISTS pm_dependencies (
+    task_id     INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    depends_on  INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    PRIMARY KEY (task_id, depends_on),
+    CHECK (task_id != depends_on)
+);
+CREATE TABLE IF NOT EXISTS pm_comments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    author_id   TEXT,
+    author      TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'comment',   -- comment | blocker | review
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pm_comments_task ON pm_comments(task_id, created_at);
+CREATE TABLE IF NOT EXISTS pm_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    at         TEXT NOT NULL,
+    actor_id   TEXT,
+    actor      TEXT,
+    field      TEXT NOT NULL,
+    old_value  TEXT,
+    new_value  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history(task_id, at);
+CREATE INDEX IF NOT EXISTS idx_pm_history_at ON pm_history(at);
+-- Requests a member makes and the leader decides (Phase 1: deadline changes).
+CREATE TABLE IF NOT EXISTS pm_requests (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id       INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL DEFAULT 'deadline',
+    requested_by  TEXT NOT NULL,          -- member name
+    proposed      TEXT NOT NULL,
+    reason        TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    decided_by    TEXT,
+    decided_at    TEXT,
+    created_at    TEXT NOT NULL
+);
+-- In-app notifications. recipient is a member name, or '@leaders' for every team leader.
+CREATE TABLE IF NOT EXISTS pm_notifications (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient   TEXT NOT NULL COLLATE NOCASE,
+    task_id     INTEGER REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    read_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pm_notifications ON pm_notifications(recipient, read_at);
 """
 
 EVENT_COLUMNS = [

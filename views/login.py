@@ -17,13 +17,15 @@ with left:
 
     if webapp.public_demo():
         st.markdown("**Explore the demo team** with one click. Everything here is fictional.")
-        c1, c2 = st.columns(2)
-        if c1.button("Explore as Neha, team leader", icon=":material/admin_panel_settings:", width="stretch"):
-            webapp.demo_sign_in(conn, "neha")
-            st.rerun()
-        if c2.button("Explore as Kabir, team member", icon=":material/visibility:", width="stretch"):
-            webapp.demo_sign_in(conn, "kabir")
-            st.rerun()
+        demo = [("neha", "Neha, team leader", ":material/admin_panel_settings:"),
+                ("kabir", "Kabir, team member", ":material/person:"),
+                ("aman", "Aman, team member", ":material/person:"),
+                ("riya", "Riya, team member", ":material/person:")]
+        cols = st.columns(2)
+        for i, (username, label, icon) in enumerate(demo):
+            if cols[i % 2].button(f"Explore as {label}", icon=icon, width="stretch", key=f"demo-{username}"):
+                webapp.demo_sign_in(conn, username)
+                st.rerun()
 
     with st.form("sign-in"):
         username = st.text_input("Username", autocomplete="username", max_chars=64)

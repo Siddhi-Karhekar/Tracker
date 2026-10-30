@@ -266,12 +266,93 @@ def seed(path: str) -> tuple[int, Path]:
         conn.execute("INSERT INTO memory (fact, source, created_at, kind, subject, fact_date, active, created_by) "
                      "VALUES (?, 'user', ?, 'deadline', 'final review', ?, 1, 'Neha')",
                      (f"Our final review is on {ahead(18)}", ago(3), ahead(18)))
+    seed_projects(conn)
     key_path = Path(path).with_name("demo_answer_key.json")
     key_path.write_text(json.dumps(key, indent=2, ensure_ascii=False))
     return count, key_path
 
 
-DEMO_ACCOUNTS = [("Neha (demo leader)", "neha", "leader", "Neha"), ("Kabir (demo member)", "kabir", "member", "Kabir")]
+def seed_projects(conn) -> None:
+    """TeamPulse 2.0 demo plan: one project the team runs inside TeamPulse, matching the story in the chat data
+    (OTP mails in spam, Kabir waiting for canteen data, Riya's order history in review)."""
+    from datetime import date, timedelta
+
+    from teampulse import pm
+
+    neha = auth_actor("Neha")
+    on = date.today()
+    d = lambda days: (on + timedelta(days=days)).isoformat()   # noqa: E731
+    pid = pm.create_project(conn, neha, "CampusEats MVP", "Canteen ordering app for our final-year project.",
+                            d(-21), d(18))
+    m_beta = pm.add_milestone(conn, neha, pid, "Beta for hostel 3", d(6))
+    m_final = pm.add_milestone(conn, neha, pid, "Final review", d(18))
+    t = lambda title, who, **kw: pm.create_task(conn, neha, pid, title, assign_to=who, **kw)   # noqa: E731
+    login = t("Login with college email OTP", ["Aman"], priority="high", due=d(-3), milestone_id=m_beta,
+              description="College email domain + 6-digit OTP.", estimate_hours=10)
+    menu = t("Menu API", ["Aman"], priority="high", due=d(-2), milestone_id=m_beta, estimate_hours=12)
+    payment = t("Payment integration (Razorpay test mode)", ["Kabir", "Aman"], priority="urgent", due=d(2),
+                milestone_id=m_beta, depends_on=[menu], estimate_hours=16,
+                description="Checkout page + webhook. Test mode only.")
+    recs = t("Food recommendations", ["Kabir"], priority="medium", due=d(8), milestone_id=m_final, estimate_hours=20)
+    history = t("Order history screen", ["Riya"], priority="medium", due=d(8), milestone_id=m_final,
+                depends_on=[menu], estimate_hours=8)
+    deploy = t("Deploy on Render", ["Aman"], priority="high", due=d(15), milestone_id=m_final,
+               depends_on=[payment], estimate_hours=6)
+    report = t("Project report draft", ["Neha"], priority="medium", due=d(16), milestone_id=m_final, estimate_hours=14)
+    t("Usability test with 5 hostel students", ["Riya", "Neha"], priority="low", due=d(12), status="backlog",
+      milestone_id=m_final)
+    t("Demo video", [], priority="low", due=d(17), status="backlog", milestone_id=m_final)
+    t("Share the API docs with Riya", ["Aman"], priority="medium", due=d(-1), milestone_id=m_beta)
+
+    kabir, aman, riya = auth_actor("Kabir"), auth_actor("Aman"), auth_actor("Riya")
+    for title in ("College email check", "OTP mail", "Rate limit resend"):
+        pm.set_status(conn, aman, pm.create_task(conn, aman, pid, title, parent_id=login), "done")
+    pm.set_status(conn, aman, login, "in_progress")
+    pm.set_progress(conn, aman, login, 90)
+    pm.set_status(conn, aman, login, "review", note="OTP mails land in spam on Outlook; SPF/DKIM added, please check.")
+    pm.set_status(conn, neha, login, "done")
+    for title, done in (("GET /menu", True), ("POST/PUT/DELETE /menu", True), ("pytest tests", True)):
+        sub = pm.create_task(conn, aman, pid, title, parent_id=menu)
+        if done:
+            pm.set_status(conn, aman, sub, "done")
+    pm.set_status(conn, aman, menu, "in_progress")
+    pm.set_progress(conn, aman, menu, 100)
+    pm.set_status(conn, aman, menu, "review")
+    pm.set_status(conn, neha, menu, "done")
+
+    for title, done in (("Checkout page", True), ("Webhook handler", False), ("Refund flow", False)):
+        sub = pm.create_task(conn, kabir, pid, title, parent_id=payment)
+        if done:
+            pm.set_status(conn, kabir, sub, "done")
+    pm.set_status(conn, kabir, payment, "in_progress")
+    pm.set_progress(conn, kabir, payment, 80)        # reported 80%, one of three subtasks done
+    pm.add_comment(conn, aman, payment, "@Kabir I can take the refund flow once the webhook is in.")
+
+    pm.set_status(conn, kabir, recs, "blocked", note="Still no past order data from the canteen.")
+    pm.set_progress(conn, kabir, recs, 30)
+    pm.request_deadline(conn, kabir, recs, d(13), "The canteen data comes on Monday; training needs 3 more days.")
+
+    pm.set_status(conn, riya, history, "in_progress")
+    for title, done in (("List view", True), ("Filters", False)):
+        sub = pm.create_task(conn, riya, pid, title, parent_id=history)
+        if done:
+            pm.set_status(conn, riya, sub, "done")
+    pm.set_progress(conn, riya, history, 60)
+    pm.set_status(conn, riya, history, "review", note="List view done; filters next week.")
+    pm.set_status(conn, neha, report, "in_progress")
+    pm.set_progress(conn, neha, report, 35)
+    del deploy
+
+
+def auth_actor(name: str):
+    """A stand-in signed-in person for seeding (leaders: Neha; everyone else a member)."""
+    from teampulse.auth import Actor
+    role = "leader" if name == "Neha" else "member"
+    return Actor(f"seed-{name.lower()}", name.lower(), name, role, name, False)
+
+
+DEMO_ACCOUNTS = [("Neha (demo leader)", "neha", "leader", "Neha"), ("Kabir (demo member)", "kabir", "member", "Kabir"),
+                 ("Aman (demo member)", "aman", "member", "Aman"), ("Riya (demo member)", "riya", "member", "Riya")]
 
 
 def create_demo_accounts(path: str) -> dict[str, str]:

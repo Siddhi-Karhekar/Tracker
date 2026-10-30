@@ -29,9 +29,12 @@ if actor.must_change:
 PAGES = {   # key: (file, title, icon, group)
     "home": ("views/home.py", "Home", ":material/monitor_heart:", "Today"),
     "ask": ("views/ask.py", "Ask", ":material/forum:", "Today"),
+    "workspace": ("views/workspace.py", "My work", ":material/person_check:", "Plan"),
+    "board": ("views/board.py", "Project board", ":material/view_kanban:", "Plan"),
+    "dashboard": ("views/dashboard.py", "Team dashboard", ":material/space_dashboard:", "Plan"),
     "blockers": ("views/blockers.py", "Blockers", ":material/block:", "Team health"),
     "conflicts": ("views/discrepancies.py", "Conflicts", ":material/compare_arrows:", "Team health"),
-    "tasks": ("views/tasks.py", "Tasks", ":material/checklist:", "Team health"),
+    "tasks": ("views/tasks.py", "Source tasks", ":material/checklist:", "Team health"),
     "contributions": ("views/contributions.py", "Contributions", ":material/diversity_3:", "People"),
     "team": ("views/team.py", "Team & access", ":material/admin_panel_settings:", "Admin"),
     "sources": ("views/sources.py", "Data sources", ":material/cable:", "Setup"),
@@ -46,7 +49,7 @@ for key, (file, title, icon, group) in PAGES.items():
         first = False
 groups.setdefault("Setup", []).append(st.Page("views/account.py", title="My account", icon=":material/person:",
                                               default=first))
-navigation = st.navigation(groups)
+navigation = st.navigation(groups, expanded=True)
 if st.session_state.pop("go_home", False):
     st.switch_page(next(iter(groups.values()))[0])
 
@@ -57,7 +60,7 @@ if webapp.auth_enabled():
         st.markdown(f"<div class='tp-meta'>Signed in as</div><b>{ui.e(actor.display_name)}</b> "
                     f"{ui.pill(role, tone)}", unsafe_allow_html=True)
         if not actor.is_leader:
-            st.caption("You have view-only access.")
+            st.caption("You can update your own tasks and comment; everything else is view-only.")
         if st.button("Sign out", icon=":material/logout:", width="stretch"):
             webapp.sign_out(agent.conn)
             st.rerun()

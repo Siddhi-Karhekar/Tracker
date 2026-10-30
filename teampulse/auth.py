@@ -52,13 +52,18 @@ PERMISSIONS = {
     "settings.manage": "Choose what members can see",
     "sources.check": "Check connections and test the AI model",
     "eval.run": "Run evaluations",
+    "pm.manage": "Create projects and tasks, assign and reassign, edit deadlines, approve requests, mark complete",
+    "pm.work": "Update their own tasks (status, progress, subtasks), report blockers, request deadline changes, "
+               "comment on any task",
 }
-MEMBER_PERMISSIONS = {"view", "ask", "contrib.review_own"}
+MEMBER_PERMISSIONS = {"view", "ask", "contrib.review_own", "pm.work"}
 
 # Pages. Admin-only pages can never be granted to members.
 PAGES = {"home": "Home", "ask": "Ask", "blockers": "Blockers", "conflicts": "Conflicts", "tasks": "Tasks",
          "contributions": "Contributions", "sources": "Data sources", "memory": "Team memory"}
-ADMIN_PAGES = {"label": "Label chat", "team": "Team & access"}
+ADMIN_PAGES = {"label": "Label chat", "team": "Team & access", "dashboard": "Team dashboard"}
+# Every signed-in person always has these; they aren't in the leader's page settings.
+PERSONAL_PAGES = {"workspace": "My work", "board": "Project board"}
 DEFAULT_MEMBER_PAGES = ["home", "ask", "blockers", "conflicts", "tasks", "contributions", "memory"]
 
 SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "dklen": 32}
@@ -472,6 +477,8 @@ def member_pages(conn) -> list[str]:
 def page_allowed(conn, actor: Actor | None, page: str) -> bool:
     if actor is None or actor.must_change:
         return False
+    if page in PERSONAL_PAGES:
+        return True
     if actor.role == "leader":
         return page in PAGES or page in ADMIN_PAGES
     return page in member_pages(conn)
