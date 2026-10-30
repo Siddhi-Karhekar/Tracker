@@ -191,7 +191,19 @@ class RetrievalAgent:
         for event_id in ranked + recent:
             if event_id not in seen:
                 order.append(event_id); seen.add(event_id)
-        order = order[:MAX_EVIDENCE]
+        # Follow reply threads: a message's direct replies often hold the answer ("who helped?", "was it fixed?").
+        threaded, seen = [], set()
+        for event_id in order[:MAX_EVIDENCE]:
+            if event_id in seen:
+                continue
+            threaded.append(event_id); seen.add(event_id)
+            if event_id.startswith("discord:"):
+                for (reply_id,) in self.conn.execute("SELECT id FROM events WHERE parent_id = ? ORDER BY created_at "
+                                                     "LIMIT 2", (event_id,)):
+                    if reply_id not in seen:
+                        threaded.append(reply_id); seen.add(reply_id)
+                        best.setdefault(reply_id, (None, "reply in the same thread"))
+        order = threaded[:MAX_EVIDENCE]
 
         rows = _load_events(self.conn, order)
         evidence = []

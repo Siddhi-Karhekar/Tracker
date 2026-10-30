@@ -124,7 +124,8 @@ def eval_blockers(conn, agent, key_path, llm, offline) -> dict:
 def eval_linking(conn, index, key_path, llm, offline) -> dict:
     res, _ = linking_eval.run(conn, index, None if offline else llm, key_path)
     best_name, best = max(res.items(), key=lambda kv: kv[1].get("accuracy") or 0)
-    return {"metrics": {"accuracy": best["accuracy"], "method": best_name},
+    return {"metrics": {"accuracy": best["accuracy"], "method": best_name,
+                        **{f"accuracy[{name}]": r["accuracy"] for name, r in res.items()}},
             "failures": best.get("errors", [])[:10]}
 
 
@@ -173,8 +174,9 @@ def eval_memory(conn, agent) -> dict:
             answer = agent.memory.ask(step["text"], who="eval")["answer"]
         facts = " | ".join(m["fact"] for m in memory.active(conn))
         ok = True
-        if "expect_active_contains" in step:
-            ok &= step["expect_active_contains"] in facts
+        if "expect_active_contains" in step:   # any accepted wording ("5 Dec", "December 5")
+            wanted = step["expect_active_contains"]
+            ok &= any(w.lower() in facts.lower() for w in (wanted if isinstance(wanted, list) else [wanted]))
         if "expect_active_not_contains" in step:
             ok &= step["expect_active_not_contains"] not in facts
         if "expect_answer_contains" in step:

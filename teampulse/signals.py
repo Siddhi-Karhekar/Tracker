@@ -131,7 +131,9 @@ Types:
   e.g. "PR re-review kar de please", "koi bata sakta hai env kaha hai?", "deploy kab karenge?"
 - decision: the team settles a choice. e.g. "final: Postgres use karenge", "chalo React Native hi lete hai"
 - progress: work done or in progress, or who is doing what. e.g. "login UI push kar diya", "payment main dekh raha hu"
-- noise: greetings, jokes, plain acknowledgements ("ok 👍", "haan"), off-topic chat.
+- noise: greetings, jokes, plain acknowledgements ("ok 👍", "haan"), off-topic chat, and social or
+  timetable questions that aren't about the project ("lunch?", "kal class hai kya?", "kaun aa raha hai?").
+  A question is only a help_request if it asks for something the PROJECT needs.
 
 Rules:
 - Label EVERY line that starts with an id like m3. Lines starting with "context" are only background.

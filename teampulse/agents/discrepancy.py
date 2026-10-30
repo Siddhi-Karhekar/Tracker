@@ -125,6 +125,12 @@ class DiscrepancyAgent:
             text, provider = self.template(items), "template"
             warnings.append(f"Language model unavailable ({type(exc).__name__}); showing the detected conflicts directly.")
         text, cited, invalid, extra = verify_citations(text, len(evidence), provider)
+        if provider != "template":   # the AI may summarise, but it may not drop a detected conflict
+            missing = [d for d in items if d["refs"] and not {n for _, _, n in d["refs"]} & set(cited)]
+            if missing:
+                text = text.rstrip() + "\n\nAlso found:\n" + self.template(missing)
+                cited = sorted(set(cited) | {n for d in missing for _, _, n in d["refs"]})
+                trace.append({"step": "added_missing_conflicts", "ms": 0, "count": len(missing)})
         trace.append({"step": "answer", "ms": int((time.time() - started) * 1000), "provider": provider,
                       "cited": cited, "invalid": invalid})
         return {"answer": text, "evidence": evidence, "cited": cited, "warnings": warnings + extra,

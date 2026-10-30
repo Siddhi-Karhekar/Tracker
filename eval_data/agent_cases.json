@@ -12,7 +12,7 @@
   "memory": [
     {"step": "remember", "text": "remember that our demo day is on 2 Dec", "expect_active_contains": "2 Dec"},
     {"step": "recall", "text": "what do you remember?", "expect_answer_contains": "2 Dec"},
-    {"step": "remember", "text": "remember that the demo day moved to 5 Dec", "expect_active_contains": "5 Dec",
+    {"step": "remember", "text": "remember that the demo day moved to 5 Dec", "expect_active_contains": ["5 Dec", "December 5", "Dec 5", "5 December", "-12-05"],
      "expect_active_not_contains": "2 Dec"},
     {"step": "forget", "text": "forget the demo day", "expect_active_not_contains": "Dec"},
     {"step": "member_write", "text": "remember that we use MongoDB now", "expect_answer_contains": "Only the team leader",

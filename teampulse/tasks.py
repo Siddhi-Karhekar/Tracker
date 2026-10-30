@@ -28,6 +28,20 @@ LINK_BATCH = 12
 LETTERS = "ABCDEFGH"
 
 
+def _reply_number(value) -> int | None:
+    """1, "1", "Message 1", "m1" → 1. Models don't always echo the exact format asked for."""
+    m = re.search(r"\d+", str(value)) if value is not None else None
+    return int(m.group(0)) if m else None
+
+
+def _letter_index(value) -> int:
+    """"A", "a", "A)", "(B)", "Option C" → 0, 0, 0, 1, 2. Anything else (null, "none") → -1."""
+    if not isinstance(value, str):
+        return -1
+    m = re.fullmatch(r"\s*(?:option\s+|task\s+)?\(?([A-H])\)?[.):]?\s*", value, re.I)
+    return LETTERS.find(m.group(1).upper()) if m else -1
+
+
 def norm_title(text: str) -> str:
     text = re.sub(r"\(?#\d+\)?", " ", text or "").lower()
     return " ".join(re.findall(r"[a-z0-9]+", text))
@@ -190,14 +204,13 @@ class Registry:
             reply = self.llm.chat([{"role": "system", "content": MATCH_PROMPT},
                                    {"role": "user", "content": "\n\n".join(lines)}], json_mode=True)
             self.llm_calls += 1
-            answers = {int(m["item"]): m.get("match") for m in extract_json(reply.text).get("matches", [])
-                       if isinstance(m, dict) and str(m.get("item", "")).isdigit()}
+            answers = {_reply_number(m.get("item")): m.get("match") for m in extract_json(reply.text).get("matches", [])
+                       if isinstance(m, dict) and _reply_number(m.get("item")) is not None}
         except Exception as exc:
             log.warning("Notion↔GitHub match check failed (%s); keeping them separate", exc)
             answers = {}
         for i, (page, cands) in enumerate(pending, 1):
-            letter = answers.get(i)
-            idx = LETTERS.find(letter) if isinstance(letter, str) and len(letter) == 1 else -1
+            idx = _letter_index(answers.get(i))
             choice = cands[idx] if 0 <= idx < len(cands) and cands[idx] not in taken else None
             decided.append((page, choice))
         return decided
@@ -261,15 +274,16 @@ def llm_choose(conn: sqlite3.Connection, index, llm: LLM, rows: list) -> tuple[d
             reply = llm.chat([{"role": "system", "content": LINK_PROMPT},
                               {"role": "user", "content": "\n\n".join(blocks)}], json_mode=True)
             calls += 1
-            answers = {int(a["message"]): a.get("task") for a in extract_json(reply.text).get("links", [])
-                       if isinstance(a, dict) and str(a.get("message", "")).isdigit()}
+            answers = {_reply_number(a.get("message")): a.get("task") for a in extract_json(reply.text).get("links", [])
+                       if isinstance(a, dict) and _reply_number(a.get("message")) is not None}
+            if not answers:   # say what came back, so a format problem is visible instead of silent
+                log.warning("Chat link check: couldn't read the AI's reply: %s", reply.text[:300])
         except Exception as exc:
             log.warning("Chat link check failed (%s); keeping scanner links", exc)
             break
         for i, (r, cands) in enumerate(batch, 1):
             if i in answers:
-                letter = answers[i]
-                idx = LETTERS.find(letter) if isinstance(letter, str) and len(letter) == 1 else -1
+                idx = _letter_index(answers[i])
                 choices[r["event_id"]] = cands[idx] if 0 <= idx < len(cands) else None
     return choices, calls
 

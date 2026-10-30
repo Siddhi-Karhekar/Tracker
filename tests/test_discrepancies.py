@@ -114,7 +114,15 @@ def test_agent_offline_and_with_llm(demo):
     assert "Aman is doing the work" in result["answer"] and result["provider"] == "template"
     assert result["cited"] and all(1 <= n <= len(result["evidence"]) for n in result["cited"])
     result = DiscrepancyAgent(conn, llm=PlanAwareLLM(), index=index).ask("where do our sources disagree?")
-    assert result["cited"] == [1, 2] and "[42]" not in result["answer"]
+    assert {1, 2} <= set(result["cited"]) and "[42]" not in result["answer"]
+    # Regression: the AI's answer covered one conflict and silently dropped the rest (real run, gpt-oss).
+    # Every detected conflict must reach the reader; the missing ones are added from the data.
+    from teampulse import discrepancies as disc
+    assert "Also found" in result["answer"]
+    items = disc.open_items(conn)
+    added = [d["title"] for d in items if d["title"] in result["answer"]]
+    assert len(added) == len(items) - 1, added        # all but the login conflict the AI itself covered
+    assert not any("Login" in t for t in added)       # ...which isn't repeated
 
 
 def test_supervisor_routes_to_discrepancies(demo):
