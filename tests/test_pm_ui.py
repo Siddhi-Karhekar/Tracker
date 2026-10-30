@@ -119,3 +119,44 @@ def test_hostile_task_text_is_never_html(team, view):  # noqa: F811
     for p in PAYLOADS:
         assert p not in live
     assert not re.search(r"<script", live, re.I)
+
+
+def test_calendar_and_timeline_tabs_render(team):  # noqa: F811
+    at = page("views/board.py", login(team, "neha"))
+    assert [t.label for t in at.tabs][:4] == ["Board", "List", "Calendar", "Timeline"]
+    assert any("tp-cal" in m.value for m in at.markdown)                 # the month grid
+    assert at.get("vega_lite_chart")                               # the timeline chart
+    ws = page("views/workspace.py", login(team, "kabir"))
+    assert "Calendar" in [t.label for t in ws.tabs]
+
+
+def test_member_reports_progress_with_evidence_and_leader_verifies(team):  # noqa: F811
+    tid = task_id(team, "Food recommendations")
+    at = page("views/workspace.py", login(team, "kabir"))
+    next(b for b in at.button if b.label == f"Open #{tid}").click().run()
+    assert not any(e.label.startswith("Verify progress") for e in at.expander)   # leaders only
+    at.slider(key=f"progress-{tid}").set_value(50)
+    at.text_input(key=f"note-{tid}").input("Trained on sample data")
+    at.text_input(key=f"evidence-{tid}").input("https://github.com/campuseats/app/pull/30")
+    next(b for b in at.button if b.label == "Save update").click().run()
+    assert not at.error, [e.value for e in at.error]
+    row = team.execute("SELECT note, evidence_url FROM pm_progress_updates WHERE task_id = ? ORDER BY id DESC",
+                       (tid,)).fetchone()
+    assert tuple(row) == ("Trained on sample data", "https://github.com/campuseats/app/pull/30")
+
+    lead = page("views/board.py", login(team, "neha"))
+    next(b for b in lead.button if b.label == f"Open #{tid}").click().run()
+    lead.slider(key=f"verified-{tid}").set_value(25)
+    next(b for b in lead.button if b.label == "Save verified progress").click().run()
+    assert not lead.error, [e.value for e in lead.error]
+    assert team.execute("SELECT verified_progress FROM pm_tasks WHERE id = ?", (tid,)).fetchone()[0] == 25
+
+
+def test_poisoned_evidence_link_is_dead(team):  # noqa: F811
+    tid = task_id(team, "Payment integration (Razorpay test mode)")
+    team.execute("UPDATE pm_progress_updates SET evidence_url = 'javascript:alert(1)'")
+    team.commit()
+    at = page("views/board.py", login(team, "neha"))
+    next(b for b in at.button if b.label == f"Open #{tid}").click().run()
+    live = " ".join(m.value for m in at.markdown if getattr(m, "allow_html", False))
+    assert "javascript:" not in live and "href='#'" in live

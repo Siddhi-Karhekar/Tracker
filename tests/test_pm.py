@@ -308,3 +308,96 @@ def test_pages_are_personal_or_leader_only(conn):
     from teampulse import actions
     actions.set_member_pages(conn, LEADER, ["dashboard", "home"])        # can't be granted to members
     assert not auth.page_allowed(conn, KABIR, "dashboard")
+
+
+# ---- progress evidence, verified progress, weighted completion --------------------------------------------------
+
+def test_progress_update_keeps_note_and_evidence(conn, project):
+    tid = new(conn, project)
+    pm.set_progress(conn, KABIR, tid, 40, note="API done", evidence_url="https://github.com/a/b/pull/3")
+    pm.set_progress(conn, KABIR, tid, 40, note="Tests added")                  # same number, new evidence of work
+    updates = pm.task_detail(conn, tid)["updates"]
+    assert [(u["kind"], u["progress"], u["note"]) for u in updates] == [("reported", 40, "Tests added"),
+                                                                        ("reported", 40, "API done")]
+    assert updates[1]["evidence_url"] == "https://github.com/a/b/pull/3"
+    for bad in ("javascript:alert(1)", "data:text/html,x", "github.com/no-scheme", "https://x.y/" + "a" * 500):
+        with pytest.raises(pm.PMError, match="evidence link"):
+            pm.set_progress(conn, KABIR, tid, 50, evidence_url=bad)
+
+
+def test_only_leaders_verify_and_it_stays_separate(conn, project):
+    tid = new(conn, project)
+    pm.set_progress(conn, KABIR, tid, 90)
+    with pytest.raises(PermissionDenied):
+        pm.verify_progress(conn, KABIR, tid, 90)                                  # no verifying your own work
+    pm.verify_progress(conn, LEADER, tid, 30, "Only the UI exists")
+    t = pm.task_detail(conn, tid)
+    assert (t["reported_progress"], t["verified_progress"], t["verified_by"]) == (90, 30, "Neha Sharma")
+    assert t["status"] != "done"                                                   # verifying never completes a task
+    assert any("leader verified 30%" in r for r in t["risks"])
+    assert any("30% verified" in n["text"] for n in pm.notifications(conn, KABIR))
+
+
+def test_completing_verifies_and_reopening_clears_it(conn, project):
+    tid = new(conn, project)
+    pm.set_status(conn, LEADER, tid, "done")
+    assert pm.task_detail(conn, tid)["verified_progress"] == 100
+    pm.set_status(conn, LEADER, tid, "in_progress")
+    assert pm.task_detail(conn, tid)["verified_progress"] is None
+
+
+def test_completion_counts_finished_size_not_average_percentages(conn, project):
+    big = new(conn, project, "Big", weight=8)
+    small = new(conn, project, "Small", weight=2)
+    pm.set_progress(conn, KABIR, big, 90)                                        # 90% reported adds nothing
+    pm.set_status(conn, LEADER, small, "done")
+    assert pm.dashboard(conn, project)["completion"] == 20                       # 2 of 10 size units finished
+    assert pm.workspace(conn, "Kabir")["metrics"]["progress"] == 20
+    with pytest.raises(pm.PMError, match="Size"):
+        new(conn, project, "Odd", weight=4)
+    pm.update_task(conn, LEADER, big, weight=2)
+    assert pm.dashboard(conn, project)["completion"] == 50
+
+
+# ---- reminders and calendar ----------------------------------------------------------------------------------
+
+def test_reminders_once_a_day_and_never_for_done_work(conn, project):
+    tomorrow = new(conn, project, "Tomorrow", due=day(1))
+    late = new(conn, project, "Late", due=day(-2), who=["Kabir", "Riya"])
+    done = new(conn, project, "Done", due=day(-1))
+    new(conn, project, "Later", due=day(9))
+    pm.set_status(conn, LEADER, done, "done")
+    assert pm.send_reminders(conn) == 4          # Kabir: tomorrow + late; Riya: late; leaders: late
+    assert pm.send_reminders(conn) == 0          # same day: nothing new
+    texts = [n["text"] for n in pm.notifications(conn, KABIR)]
+    assert any("“Tomorrow” is due tomorrow" in x for x in texts) and any("2 days past" in x for x in texts)
+    assert not any("“Done” is" in x for x in texts)
+    assert pm.send_reminders(conn, on=date.today() + timedelta(days=1)) == 3   # next day: members again, not leaders
+    del tomorrow, late
+
+
+def test_calendar_month(conn, project):
+    due = date.today().replace(day=15)
+    tid = new(conn, project, "Mid-month", due=due.isoformat())
+    pm.add_milestone(conn, LEADER, project, "Demo", due.isoformat())
+    days = pm.calendar(conn, due.year, due.month, project_id=project)
+    assert [t["id"] for t in days[15]["tasks"]] == [tid] and days[15]["milestones"][0]["title"] == "Demo"
+    assert 15 not in pm.calendar(conn, due.year, due.month, member="Riya")
+    assert 15 in pm.calendar(conn, due.year, due.month, member="Kabir")
+
+
+def test_phase1_database_upgrades_in_place(tmp_path):
+    """A database created before verified progress and weights existed gets the new columns on start."""
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    db.connect(path)
+    raw = sqlite3.connect(path)
+    raw.execute("DROP INDEX idx_pm_notifications_dedupe")
+    for col in ("weight", "verified_progress", "verified_by", "verified_at"):
+        raw.execute(f"ALTER TABLE pm_tasks DROP COLUMN {col}")
+    raw.execute("ALTER TABLE pm_notifications DROP COLUMN dedupe")
+    raw.commit()
+    raw.close()
+    c = db.connect(path)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(pm_tasks)")}
+    assert {"weight", "verified_progress"} <= cols

@@ -23,7 +23,7 @@ cols = st.columns(6)
 for col, (label, value) in zip(cols, [("Tasks", d["total"]), ("Completed", f"{d['completion']}%"),
                                       ("In progress", d["by_status"]["in_progress"]), ("Under review", len(d["review"])),
                                       ("Blocked", d["by_status"]["blocked"]), ("Overdue", d["overdue"])]):
-    col.metric(label, value)
+    col.metric(label, value, help=pm.COMPLETION_NOTE if label == "Completed" else None)
 
 pm_ui.open_task_panel(conn, actor)
 
@@ -62,7 +62,8 @@ with plan:
     if not d["milestones"]:
         st.caption("No upcoming milestones.")
     for m in d["milestones"]:
-        st.markdown(ui.row(ui.e(m["title"]), f"{m['done']} of {m['tasks']} tasks completed",
+        st.markdown(ui.row(ui.e(m["title"]), f"{m['completion']}% complete by size · {m['done']} of {m['tasks']} "
+                                             f"tasks completed",
                            "ok" if m["tasks"] and m["done"] == m["tasks"] else "quiet",
                            f"{ui.e(m['project'])} · due {ui.e(m['due_date'] or 'not set')}"), unsafe_allow_html=True)
     st.subheader("Recent activity")

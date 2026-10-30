@@ -29,7 +29,8 @@ PRIORITY_LABEL = {p: p.title() for p in PRIORITIES}
 LEADERS = "@leaders"
 WRITES_PER_10_MIN = 120          # per person; stops a runaway script or a public-demo visitor flooding the board
 SOON_DAYS = 7
-LEADER_FIELDS = {"title", "description", "priority", "due_date", "start_date", "milestone_id", "estimate_hours"}
+LEADER_FIELDS = {"title", "description", "priority", "due_date", "start_date", "milestone_id", "estimate_hours", "weight"}
+WEIGHTS = (1, 2, 3, 5, 8)        # task size; completion % counts finished size, not an average of percentages
 
 
 class PMError(AuthError):
@@ -66,6 +67,26 @@ def _text(value, label: str, limit: int, required: bool = False) -> str:
     if len(text) > limit:
         raise PMError(f"The {label} is too long (at most {limit} characters).")
     return text
+
+
+def _url(value) -> str | None:
+    """Evidence links: http(s) only, so nothing like javascript: is ever stored."""
+    link = str(value or "").strip()
+    if not link:
+        return None
+    if not re.match(r"^https?://[^\s<>\"']+$", link, re.IGNORECASE) or len(link) > 500:
+        raise PMError("The evidence link must be a full web address starting with https:// (at most 500 characters).")
+    return link
+
+
+def _weight(value) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = 0
+    if value not in WEIGHTS:
+        raise PMError("Size must be 1, 2, 3, 5 or 8.")
+    return value
 
 
 def members(conn) -> list[str]:
@@ -244,7 +265,7 @@ def _project(conn, project_id) -> dict:
 
 def create_task(conn, actor: Actor, project_id: int, title: str, description: str = "", assign_to=(),
                 priority: str = "medium", due=None, start=None, status: str = "todo", milestone_id=None,
-                estimate_hours=None, depends_on=(), parent_id=None) -> int:
+                estimate_hours=None, depends_on=(), parent_id=None, weight: int = 1) -> int:
     """Leaders create tasks. A member may add a subtask (parent_id) to a task assigned to them."""
     project = _project(conn, project_id)
     if parent_id:
@@ -272,15 +293,16 @@ def create_task(conn, actor: Actor, project_id: int, title: str, description: st
     estimate = None if estimate_hours in (None, "") else float(estimate_hours)
     if estimate is not None and not 0 <= estimate <= 1000:
         raise PMError("The estimate must be between 0 and 1000 hours.")
+    weight = _weight(weight)
     stamp = iso(now())
     with conn:
         tid = conn.execute(
             "INSERT INTO pm_tasks (project_id, parent_id, milestone_id, title, description, priority, status, "
-            "estimate_hours, start_date, due_date, created_by, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "estimate_hours, start_date, due_date, created_by, created_at, updated_at, weight) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (project["id"], int(parent_id) if parent_id else None, int(milestone_id) if milestone_id else None, title,
              _text(description, "description", 4000), priority, status, estimate, start, due, actor.id, stamp,
-             stamp)).lastrowid
+             stamp, weight)).lastrowid
         conn.executemany("INSERT INTO pm_assignees (task_id, member) VALUES (?, ?)", [(tid, n) for n in names])
         deps = _check_dependencies(conn, tid, project["id"], depends_on)
         conn.executemany("INSERT INTO pm_dependencies (task_id, depends_on) VALUES (?, ?)", [(tid, d) for d in deps])
@@ -315,6 +337,8 @@ def update_task(conn, actor: Actor, task_id: int, version: int | None = None, **
                 raise PMError("That milestone belongs to another project.")
         elif key == "estimate_hours":
             value = None if value in (None, "") else float(value)
+        elif key == "weight":
+            value = _weight(value)
         if key in LEADER_FIELDS and value != task[key]:
             fields[key] = value
     due, start = fields.get("due_date", task["due_date"]), fields.get("start_date", task["start_date"])
@@ -380,6 +404,10 @@ def set_status(conn, actor: Actor, task_id: int, status: str, version: int | Non
               "completed_at": iso(now()) if status == "done" else None}
     if status == "done":
         fields["reported_progress"] = 100
+        if not subtask:            # the leader approving finished work is the verification
+            fields.update(verified_progress=100, verified_by=actor.display_name, verified_at=iso(now()))
+    elif task["status"] == "done" and not subtask:
+        fields.update(verified_progress=None, verified_by=None, verified_at=None)   # reopened: not verified any more
     with conn:
         _save(conn, task, version, fields)
         _history(conn, task["id"], actor, "status", task["status"], status)
@@ -405,23 +433,59 @@ def report_blocker(conn, actor: Actor, task_id: int, reason: str, version: int |
     set_status(conn, actor, task_id, "blocked", version, reason)
 
 
-def set_progress(conn, actor: Actor, task_id: int, progress: int, version: int | None = None) -> None:
-    task = _row(conn, task_id)
-    _require_work(conn, actor, task, "pm.task.progress")
+def _percent(progress) -> int:
     try:
         progress = int(progress)
     except (TypeError, ValueError):
         raise PMError("Progress must be a whole number from 0 to 100.") from None
     if not 0 <= progress <= 100:
         raise PMError("Progress must be from 0 to 100.")
+    return progress
+
+
+def _progress_update(conn, task: dict, actor: Actor, kind: str, progress: int, note: str, evidence: str | None) -> None:
+    conn.execute("INSERT INTO pm_progress_updates (task_id, kind, author_id, author, progress, note, evidence_url, "
+                 "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 (task["id"], kind, actor.id, _who(actor), progress, note, evidence, iso(now())))
+
+
+def set_progress(conn, actor: Actor, task_id: int, progress: int, version: int | None = None, note: str = "",
+                 evidence_url: str = "") -> None:
+    """The assignee's own progress number, optionally with what they did and a link to show it (a PR, a doc).
+    This is "self-reported"; only verify_progress (leaders) sets verified progress."""
+    task = _row(conn, task_id)
+    _require_work(conn, actor, task, "pm.task.progress")
+    progress = _percent(progress)
+    note, evidence = _text(note, "progress note", 1000), _url(evidence_url)
     if task["status"] == "done" and progress != 100 and not can_manage(actor):
         raise PMError("This task is completed. Ask the team leader to reopen it.")
-    if progress == task["reported_progress"]:
+    if progress == task["reported_progress"] and not (note or evidence):
         return
     with conn:
         _save(conn, task, version, {"reported_progress": progress})
-        _history(conn, task["id"], actor, "reported_progress", task["reported_progress"], progress)
+        if progress != task["reported_progress"]:
+            _history(conn, task["id"], actor, "reported_progress", task["reported_progress"], progress)
+        _progress_update(conn, task, actor, "reported", progress, note, evidence)
     audit(conn, actor, "pm.task.progress", f"task {task['id']}", detail=str(progress))
+
+
+def verify_progress(conn, actor: Actor, task_id: int, progress: int, note: str = "", version: int | None = None,
+                    evidence_url: str = "") -> None:
+    """The team leader confirms how far the work really is, after looking at it. Separate from the assignee's own
+    number, never set automatically. 100% here doesn't complete the task; approving it in review does."""
+    require(conn, actor, "pm.manage", f"task {task_id}")
+    _rate(conn, actor)
+    task = _row(conn, task_id)
+    progress = _percent(progress)
+    note, evidence = _text(note, "note", 1000), _url(evidence_url)
+    with conn:
+        _save(conn, task, version, {"verified_progress": progress, "verified_by": actor.display_name,
+                                    "verified_at": iso(now())})
+        _history(conn, task["id"], actor, "verified_progress", task["verified_progress"], progress)
+        _progress_update(conn, task, actor, "verified", progress, note, evidence)
+        _notify(conn, actor, task["assignees"], task["id"],
+                f"{_who(actor)} checked “{task['title']}”: {progress}% verified" + (f". {note}" if note else ""))
+    audit(conn, actor, "pm.task.verify", f"task {task['id']}", detail=str(progress))
 
 
 def add_comment(conn, actor: Actor, task_id: int, body: str) -> int:
@@ -574,8 +638,10 @@ def risks(task: dict) -> list[str]:
         out.append("blocked" + (f": {task['blocked_reason']}" if task.get("blocked_reason") else ""))
     if task.get("waiting_on") and left is not None and left <= SOON_DAYS:
         out.append("waiting for " + ", ".join(f"“{t}”" for t in task["waiting_on"]))
-    measured = task.get("measured_progress")
-    if measured is not None and task["reported_progress"] - measured >= 40:
+    verified, measured = task.get("verified_progress"), task.get("measured_progress")
+    if verified is not None and task["reported_progress"] - verified >= 40:
+        out.append(f"reported {task['reported_progress']}% but the leader verified {verified}%")
+    elif verified is None and measured is not None and task["reported_progress"] - measured >= 40:
         out.append(f"reported {task['reported_progress']}% but only {measured}% of subtasks are done")
     if not task.get("assignees") and not task.get("parent_id"):
         out.append("nobody is assigned")
@@ -623,9 +689,23 @@ def task_detail(conn, task_id: int, on: date | None = None) -> dict:
         "SELECT * FROM pm_history WHERE task_id = ? ORDER BY id DESC LIMIT 50", (task["id"],))]
     task["requests"] = [dict(r) for r in conn.execute(
         "SELECT * FROM pm_requests WHERE task_id = ? ORDER BY id DESC", (task["id"],))]
+    task["updates"] = [dict(r) for r in conn.execute(
+        "SELECT * FROM pm_progress_updates WHERE task_id = ? ORDER BY id DESC LIMIT 30", (task["id"],))]
     task["milestone"] = (conn.execute("SELECT title FROM pm_milestones WHERE id = ?", (task["milestone_id"],))
                          .fetchone() or [None])[0] if task["milestone_id"] else None
     return task
+
+
+def completion(tasks_: list[dict]) -> int:
+    """Share of the work that is Completed, counting each task by its size (weight). Percentages people report are
+    deliberately not averaged: three tasks "at 90%" are not 90% of a project."""
+    total = sum(t.get("weight") or 1 for t in tasks_)
+    done = sum(t.get("weight") or 1 for t in tasks_ if t["status"] == "done")
+    return round(100 * done / total) if total else 0
+
+
+COMPLETION_NOTE = ("Completion counts finished tasks by size (weight 1, 2, 3, 5 or 8, set by the leader). A task counts "
+                   "only once the leader has marked it Completed; reported percentages are not averaged.")
 
 
 def workspace(conn, member: str, on: date | None = None) -> dict:
@@ -651,7 +731,7 @@ def workspace(conn, member: str, on: date | None = None) -> dict:
         "SELECT r.*, t.title FROM pm_requests r JOIN pm_tasks t ON t.id = r.task_id WHERE r.requested_by = ? "
         "ORDER BY r.id DESC LIMIT 10", (member,))]
     done_recent = [t for t in sections["completed"] if (t["completed_at"] or "") >= week_ago]
-    progress = round(sum(100 if t["status"] == "done" else t["reported_progress"] for t in top) / len(top)) if top else 0
+    progress = completion(top)
     return {
         "member": member, "sections": sections, "requests": pending,
         "metrics": {"assigned": len(top), "open": len(open_), "in_progress": len(sections["in_progress"]),
@@ -686,7 +766,8 @@ def dashboard(conn, project_id: int | None = None, on: date | None = None) -> di
     upcoming = []
     for m in conn.execute(sql + " ORDER BY m.due_date IS NULL, m.due_date LIMIT 8", params):
         linked = [t for t in top if t["milestone_id"] == m["id"]]
-        upcoming.append({**dict(m), "tasks": len(linked), "done": sum(t["status"] == "done" for t in linked)})
+        upcoming.append({**dict(m), "tasks": len(linked), "done": sum(t["status"] == "done" for t in linked),
+                         "completion": completion(linked)})
     req_sql = ("SELECT r.*, t.title, t.due_date FROM pm_requests r JOIN pm_tasks t ON t.id = r.task_id "
                "WHERE r.status = 'pending' AND t.archived = 0")
     req_params: list = []
@@ -697,7 +778,7 @@ def dashboard(conn, project_id: int | None = None, on: date | None = None) -> di
                + (" WHERE t.project_id = ?" if project_id else "") + " ORDER BY h.id DESC LIMIT 15")
     return {
         "total": total, "by_status": by_status,
-        "completion": round(100 * by_status["done"] / total) if total else 0,
+        "completion": completion(top),
         "overdue": sum(t["overdue"] for t in top),
         "at_risk": [t for t in top if t["risks"]],
         "review": [t for t in top if t["status"] == "review"],
@@ -705,3 +786,58 @@ def dashboard(conn, project_id: int | None = None, on: date | None = None) -> di
         "workload": workload, "milestones": upcoming,
         "activity": [dict(r) for r in conn.execute(act_sql, [int(project_id)] if project_id else [])],
     }
+
+
+# ---- reminders -------------------------------------------------------------------------------------------
+
+def send_reminders(conn, on: date | None = None) -> int:
+    """Deadline reminders: each assignee once a day for work due today or tomorrow, and for overdue work; the leaders
+    once per overdue task. Safe to call as often as you like (the poll loop and page loads both do): a reminder
+    already sent today is never sent again. Returns how many were created."""
+    on = on or today()
+    stamp, created = iso(now()), 0
+    with conn:
+        for t in tasks(conn, on=on):
+            if t["status"] == "done" or t["days_left"] is None or t["days_left"] > 1:
+                continue
+            title, left = t["title"], t["days_left"]
+            if left < 0:
+                text = f"“{title}” is {-left} day{'s' if left != -1 else ''} past its deadline ({t['due_date']})"
+                kind = "overdue"
+            else:
+                text = f"“{title}” is due {'today' if left == 0 else 'tomorrow'}"
+                kind = "due"
+            for member in t["assignees"]:
+                created += conn.execute(
+                    "INSERT OR IGNORE INTO pm_notifications (recipient, task_id, text, created_at, dedupe) "
+                    "VALUES (?, ?, ?, ?, ?)", (member, t["id"], text, stamp,
+                                               f"{kind}:{t['id']}:{member.lower()}:{on.isoformat()}")).rowcount
+            if kind == "overdue":   # leaders hear once per task, not every day
+                created += conn.execute(
+                    "INSERT OR IGNORE INTO pm_notifications (recipient, task_id, text, created_at, dedupe) "
+                    "VALUES (?, ?, ?, ?, ?)", (LEADERS, t["id"], f"{text}. Assigned to "
+                                               f"{', '.join(t['assignees']) or 'nobody'}.", stamp,
+                                               f"overdue-leaders:{t['id']}:{t['due_date']}")).rowcount
+    return created
+
+
+# ---- calendar ------------------------------------------------------------------------------------------
+
+def calendar(conn, year: int, month: int, project_id: int | None = None, member: str | None = None) -> dict:
+    """Deadlines and milestones in one month: {day: {"tasks": [...], "milestones": [...]}}."""
+    first = date(year, month, 1)
+    last = (first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    days: dict[int, dict] = {}
+    for t in tasks(conn, project_id=project_id, member=member):
+        if t["due_date"] and first.isoformat() <= t["due_date"] <= last.isoformat():
+            days.setdefault(int(t["due_date"][8:10]), {"tasks": [], "milestones": []})["tasks"].append(t)
+    sql = ("SELECT m.* FROM pm_milestones m JOIN pm_projects p ON p.id = m.project_id WHERE p.archived = 0 "
+           "AND m.due_date BETWEEN ? AND ?")
+    params: list = [first.isoformat(), last.isoformat()]
+    if project_id:
+        sql += " AND m.project_id = ?"
+        params.append(int(project_id))
+    if not member:
+        for m in conn.execute(sql, params):
+            days.setdefault(int(m["due_date"][8:10]), {"tasks": [], "milestones": []})["milestones"].append(dict(m))
+    return days

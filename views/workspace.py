@@ -28,6 +28,7 @@ ui.header("My work" if own else f"{member}'s work",
           "Everything assigned to you, what's late, what's next, and what's waiting on someone." if own else
           f"What {member} sees in their own workspace.")
 pm_ui.flash()
+pm.send_reminders(conn)   # due today / tomorrow / overdue; at most once a day per task, so cheap to repeat
 w = pm.workspace(conn, member)
 m = w["metrics"]
 cols = st.columns(6)
@@ -39,8 +40,9 @@ for col, (label, value, help_) in zip(cols, [
         ("Blocked", m["blocked"], None),
         ("Completed", m["completed"], f"{m['completed_this_week']} this week")]):
     col.metric(label, value, help=help_)
-st.progress(m["progress"] / 100, text=f"Overall progress on your tasks: {m['progress']}%"
+st.progress(m["progress"] / 100, text=f"{m['progress']}% of {'your' if own else 'their'} work completed"
             + (f" · about {m['open_hours']:g} hours of estimated work open" if m["open_hours"] else ""))
+st.caption(pm.COMPLETION_NOTE)
 
 if own:
     notes = pm.notifications(conn, actor)
@@ -57,7 +59,7 @@ if own:
 pm_ui.open_task_panel(conn, actor)
 
 s = w["sections"]
-focus, everything, requests = st.tabs(["Focus", "All tasks", "Requests"])
+focus, everything, month, requests = st.tabs(["Focus", "All tasks", "Calendar", "Requests"])
 with focus:
     if not (s["overdue"] or s["due_soon"] or s["blocked"] or s["high_priority"]):
         ui.empty("Nothing urgent.", "No overdue, blocked or high-priority work, and nothing due in the next 7 days.")
@@ -76,6 +78,8 @@ with everything:
                        ("completed", "Completed"), ("recent", "Recently updated")):
         st.subheader(title)
         pm_ui.task_list(s[key], f"all-{key}", show_people=False)
+with month:
+    pm_ui.calendar_view(conn, "ws-cal", member=member)
 with requests:
     if not w["requests"]:
         st.caption("No deadline requests. Open a task and use “Ask for a different deadline”.")

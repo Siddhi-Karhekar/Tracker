@@ -52,11 +52,13 @@ in Hinglish. The three drift apart, and nobody has time to cross-check them. Tea
 - **My work**: each member's personal section shows what's overdue, due soon, blocked, high priority, in
   progress, under review and done, plus notifications and their deadline requests.
 - **Project board**: projects, milestones, tasks with several assignees, subtasks, dependencies, comments and
-  full history. Workflow: Backlog → To do → In progress → Under review → Completed, plus Blocked.
+  full history, as a board, a list, a calendar or a timeline. Workflow: Backlog → To do → In progress → Under
+  review → Completed, plus Blocked. Deadline reminders arrive once a day.
 - **Team dashboard** (leader): completion, workload per person (alphabetical, never ranked), at-risk work,
   and what needs a decision (finished work to approve, deadline requests).
 - Members update their own tasks, report blockers, ask for a new deadline and comment. The leader plans,
-  assigns and marks work Completed. **Reported progress** is shown next to **measured progress** from subtasks.
+  assigns, verifies progress and marks work Completed. **Self-reported progress** (with evidence links) is kept
+  separate from **verified progress**, which only the leader sets. Completion % counts finished work by size.
   Design, permission matrix and roadmap: [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
 
 **Also included**
@@ -404,11 +406,12 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **223 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **233 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
 regression test for every bug found by real AI runs, and project management (permissions per role and per
-assignee, workflow rules, two people editing at once, both roles through the pages). CI runs them on every push: Linux (Python 3.12 and
-3.13), Windows, lint, dependency scan, and the RAGAS wiring check.
+assignee, workflow rules, two people editing at once, both roles through the pages). A Playwright test runs the
+whole assign → update → review workflow in real Chromium (`TEAMPULSE_E2E=1 python -m pytest tests/e2e`). CI runs them on every push: Linux (Python 3.12 and
+3.13), Windows, the browser test, lint, dependency scan, and the RAGAS wiring check.
 
 ### Per-agent evaluation
 Each agent is tested on its own job against the demo answer key, with a threshold per metric
@@ -605,7 +608,7 @@ teampulse/
 eval_data/                  18 golden questions (with reference answers), 60 Hinglish messages,
                             agent cases, thresholds
 docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
-tests/                      223 offline tests (+ tests/eval_env for the RAGAS environment)
+tests/                      233 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment

@@ -48,16 +48,17 @@ if manage:
             priority = c2.selectbox("Priority", pm.PRIORITIES, index=1, format_func=pm.PRIORITY_LABEL.get)
             status = c3.selectbox("Starts in", [s for s in pm.STATUSES if s != "done"], index=1,
                                   format_func=pm.STATUS_LABEL.get)
-            c4, c5, c6 = st.columns(3)
+            c4, c5, c6, c7 = st.columns(4)
             due = c4.date_input("Deadline", value=None)
             milestone = c5.selectbox("Milestone", [None, *stones], format_func=lambda m: stones[m]["title"] if m else "None")
             estimate = c6.number_input("Estimate (hours)", 0.0, 1000.0, 0.0, step=1.0)
+            weight = c7.selectbox("Size", pm.WEIGHTS, help="How big it is. Completion % counts finished tasks by size.")
             deps = st.multiselect("Waits for", [t["id"] for t in everything],
                                   format_func=lambda i: next(f"#{t['id']} {t['title']}" for t in everything if t["id"] == i))
             if st.form_submit_button("Create task", type="primary"):
                 pm_ui._do(lambda: pm.create_task(conn, actor, project_id, title, description, assigned, priority, due,
                                                  status=status, milestone_id=milestone, estimate_hours=estimate or None,
-                                                 depends_on=deps), "Task created.")
+                                                 depends_on=deps, weight=weight), "Task created.")
     with st.expander("New milestone", icon=":material/flag:"):
         with st.form("new-milestone", clear_on_submit=True, border=False):
             c1, c2 = st.columns([3, 1])
@@ -80,22 +81,23 @@ if search.strip():
 done = sum(t["status"] == "done" for t in everything)
 st.caption(f"{len(everything)} tasks · {done} completed"
            + (f" · showing {len(shown)} after filters" if len(shown) != len(everything) else ""))
-board, table = st.tabs(["Board", "List"])
+board, table, month, timeline = st.tabs(["Board", "List", "Calendar", "Timeline"])
 with board:
     columns = st.columns(len(pm.STATUSES))
     for col, status in zip(columns, pm.STATUSES):
         here = [t for t in shown if t["status"] == status]
         with col:
             st.markdown(f"**{pm.STATUS_LABEL[status]}** <span class='tp-meta'>{len(here)}</span>", unsafe_allow_html=True)
-            pm_ui.task_list(here, f"board-{status}", empty="—")
+            pm_ui.task_list(here, f"board-{status}", empty="—", size=8)
 with table:
     if shown:
+        page = pm_ui.paginate(shown, "list", 50)
         st.dataframe(pd.DataFrame([{
             "#": t["id"], "Task": t["title"], "Status": pm.STATUS_LABEL[t["status"]],
             "Priority": pm.PRIORITY_LABEL[t["priority"]], "Assigned to": ", ".join(t["assignees"]),
-            "Deadline": t["due_date"] or "", "Reported %": t["reported_progress"],
-            "Measured %": t["measured_progress"], "Milestone": stones.get(t["milestone_id"], {}).get("title", ""),
-            "Watch out": "; ".join(t["risks"])} for t in shown]), hide_index=True, width="stretch")
+            "Deadline": t["due_date"] or "", "Reported %": t["reported_progress"], "Milestone": stones.get(t["milestone_id"], {}).get("title", ""),
+            "Size": t["weight"], "Verified %": t["verified_progress"],
+            "Watch out": "; ".join(t["risks"])} for t in page]), hide_index=True, width="stretch")
         pick = st.selectbox("Open a task", [None, *[t["id"] for t in shown]],
                             format_func=lambda i: "Choose…" if i is None else
                             next(f"#{t['id']} {t['title']}" for t in shown if t["id"] == i), key="pm_pick")
@@ -104,3 +106,7 @@ with table:
             st.rerun()
     else:
         st.caption("No tasks match.")
+with month:
+    pm_ui.calendar_view(conn, "board-cal", project_id=project_id)
+with timeline:
+    pm_ui.timeline_view(shown, list(stones.values()))

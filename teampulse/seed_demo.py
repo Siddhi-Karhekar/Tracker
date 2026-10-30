@@ -287,18 +287,20 @@ def seed_projects(conn) -> None:
     m_beta = pm.add_milestone(conn, neha, pid, "Beta for hostel 3", d(6))
     m_final = pm.add_milestone(conn, neha, pid, "Final review", d(18))
     t = lambda title, who, **kw: pm.create_task(conn, neha, pid, title, assign_to=who, **kw)   # noqa: E731
-    login = t("Login with college email OTP", ["Aman"], priority="high", due=d(-3), milestone_id=m_beta,
-              description="College email domain + 6-digit OTP.", estimate_hours=10)
-    menu = t("Menu API", ["Aman"], priority="high", due=d(-2), milestone_id=m_beta, estimate_hours=12)
-    payment = t("Payment integration (Razorpay test mode)", ["Kabir", "Aman"], priority="urgent", due=d(2),
-                milestone_id=m_beta, depends_on=[menu], estimate_hours=16,
+    login = t("Login with college email OTP", ["Aman"], priority="high", due=d(-3), start=d(-16), milestone_id=m_beta,
+              description="College email domain + 6-digit OTP.", estimate_hours=10, weight=3)
+    menu = t("Menu API", ["Aman"], priority="high", due=d(-2), start=d(-14), milestone_id=m_beta, estimate_hours=12, weight=3)
+    payment = t("Payment integration (Razorpay test mode)", ["Kabir", "Aman"], priority="urgent", due=d(2), start=d(-6),
+                milestone_id=m_beta, depends_on=[menu], estimate_hours=16, weight=5,
                 description="Checkout page + webhook. Test mode only.")
-    recs = t("Food recommendations", ["Kabir"], priority="medium", due=d(8), milestone_id=m_final, estimate_hours=20)
+    recs = t("Food recommendations", ["Kabir"], priority="medium", due=d(8), start=d(-10), milestone_id=m_final, estimate_hours=20,
+             weight=5)
     history = t("Order history screen", ["Riya"], priority="medium", due=d(8), milestone_id=m_final,
-                depends_on=[menu], estimate_hours=8)
+                depends_on=[menu], estimate_hours=8, weight=2)
     deploy = t("Deploy on Render", ["Aman"], priority="high", due=d(15), milestone_id=m_final,
-               depends_on=[payment], estimate_hours=6)
-    report = t("Project report draft", ["Neha"], priority="medium", due=d(16), milestone_id=m_final, estimate_hours=14)
+               depends_on=[payment], estimate_hours=6, weight=2)
+    report = t("Project report draft", ["Neha"], priority="medium", due=d(16), start=d(-4), milestone_id=m_final, estimate_hours=14,
+               weight=3)
     t("Usability test with 5 hostel students", ["Riya", "Neha"], priority="low", due=d(12), status="backlog",
       milestone_id=m_final)
     t("Demo video", [], priority="low", due=d(17), status="backlog", milestone_id=m_final)
@@ -325,7 +327,9 @@ def seed_projects(conn) -> None:
         if done:
             pm.set_status(conn, kabir, sub, "done")
     pm.set_status(conn, kabir, payment, "in_progress")
-    pm.set_progress(conn, kabir, payment, 80)        # reported 80%, one of three subtasks done
+    pm.set_progress(conn, kabir, payment, 80, note="Checkout page works in test mode.",
+                    evidence_url="https://github.com/campuseats/app/pull/17")   # reported 80%, 1 of 3 subtasks done
+    pm.verify_progress(conn, neha, payment, 40, "Checkout works; webhook and refunds not started.")
     pm.add_comment(conn, aman, payment, "@Kabir I can take the refund flow once the webhook is in.")
 
     pm.set_status(conn, kabir, recs, "blocked", note="Still no past order data from the canteen.")
@@ -337,7 +341,8 @@ def seed_projects(conn) -> None:
         sub = pm.create_task(conn, riya, pid, title, parent_id=history)
         if done:
             pm.set_status(conn, riya, sub, "done")
-    pm.set_progress(conn, riya, history, 60)
+    pm.set_progress(conn, riya, history, 60, note="List view merged.",
+                    evidence_url="https://github.com/campuseats/app/pull/21")
     pm.set_status(conn, riya, history, "review", note="List view done; filters next week.")
     pm.set_status(conn, neha, report, "in_progress")
     pm.set_progress(conn, neha, report, 35)

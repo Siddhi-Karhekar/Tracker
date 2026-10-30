@@ -6,8 +6,11 @@ here is only a convenience.
 """
 from __future__ import annotations
 
-from datetime import date
+import calendar as calendar_lib
+from datetime import date, timedelta
 
+import altair as alt
+import pandas as pd
 import streamlit as st
 
 from teampulse import auth, pm, ui
@@ -17,6 +20,7 @@ STATUS_TONE = {"backlog": "quiet", "todo": "quiet", "in_progress": "info", "revi
                "done": "ok"}
 PRIORITY_TONE = {"low": "quiet", "medium": "quiet", "high": "warn", "urgent": "bad"}
 OPEN_KEY = "pm_open"
+PAGE_SIZE = 15
 
 
 def status_pill(status: str) -> str:
@@ -44,11 +48,11 @@ def due_text(t: dict) -> str:
 
 
 def progress_text(t: dict) -> str:
-    measured = t.get("measured_progress")
     out = f"reported {t['reported_progress']}%"
-    if measured is not None:
-        sub = f", {t['subtasks_done']}/{t['subtasks_total']} subtasks" if t.get("subtasks_total") else ""
-        out += f" · measured {measured}%{sub}"
+    if t.get("subtasks_total"):
+        out += f" · {t['subtasks_done']}/{t['subtasks_total']} subtasks"
+    if t.get("verified_progress") is not None:
+        out += f" · verified {t['verified_progress']}%"
     return out
 
 
@@ -70,11 +74,22 @@ def card_html(t: dict, show_people: bool = True) -> str:
     return ui.row(title, body, tone(t), meta)
 
 
-def task_list(tasks: list[dict], key: str, show_people: bool = True, empty: str = "Nothing here.") -> None:
+def paginate(items: list, key: str, size: int = PAGE_SIZE) -> list:
+    """Show long lists a page at a time; returns the items on the current page."""
+    if len(items) <= size:
+        return items
+    pages = (len(items) + size - 1) // size
+    page = st.number_input(f"Page (of {pages})", 1, pages, 1, key=f"{key}-page", width=140)
+    st.caption(f"Showing {(page - 1) * size + 1}–{min(page * size, len(items))} of {len(items)}")
+    return items[(page - 1) * size: page * size]
+
+
+def task_list(tasks: list[dict], key: str, show_people: bool = True, empty: str = "Nothing here.",
+              size: int = PAGE_SIZE) -> None:
     if not tasks:
         st.caption(empty)
         return
-    for t in tasks:
+    for t in paginate(tasks, key, size):
         st.markdown(card_html(t, show_people), unsafe_allow_html=True)
         if st.button(f"Open #{t['id']}", key=f"{key}-open-{t['id']}", type="tertiary"):
             st.session_state[OPEN_KEY] = t["id"]
@@ -125,13 +140,18 @@ def task_panel(conn, actor: Actor, task_id: int) -> None:
             st.session_state.pop(OPEN_KEY, None)
             st.rerun()
 
-        a, b = st.columns(2)
-        a.progress(t["reported_progress"] / 100, text=f"Reported by assignee: {t['reported_progress']}%")
-        if t["measured_progress"] is None:
-            b.caption("Measured progress: add subtasks to measure it. It becomes 100% when the leader marks the "
-                      "task Completed.")
+        a, b, c = st.columns(3)
+        a.progress(t["reported_progress"] / 100, text=f"Self-reported: {t['reported_progress']}%")
+        if t["subtasks_total"]:
+            sub = round(100 * t["subtasks_done"] / t["subtasks_total"])
+            b.progress(sub / 100, text=f"Subtasks done: {t['subtasks_done']}/{t['subtasks_total']}")
         else:
-            b.progress(t["measured_progress"] / 100, text=f"Measured (subtasks and approval): {t['measured_progress']}%")
+            b.caption("Subtasks: none yet")
+        if t["verified_progress"] is None:
+            c.caption("Verified: not checked yet. Only the team leader verifies progress.")
+        else:
+            c.progress(t["verified_progress"] / 100, text=f"Verified: {t['verified_progress']}%")
+            c.caption(f"Checked by {t['verified_by']}, {ui.ago(t['verified_at'])}.")
         if t["description"]:
             st.markdown(ui.e(t["description"]).replace("\n", "<br>"), unsafe_allow_html=True)
         if t["risks"]:
@@ -148,6 +168,8 @@ def task_panel(conn, actor: Actor, task_id: int) -> None:
         _subtasks(conn, actor, t, work)
         if manage and t["status"] == "review":
             _review(conn, actor, t)
+        if manage and not t["parent_id"] and t["status"] != "done":
+            _verify_form(conn, actor, t)
         if work:
             _update_form(conn, actor, t, manage)
         if manage:
@@ -155,6 +177,7 @@ def task_panel(conn, actor: Actor, task_id: int) -> None:
             _edit_form(conn, actor, t)
         elif not work:
             st.caption("This task isn't assigned to you, so you can read and comment but not change it.")
+        _updates(t)
         _comments(conn, actor, t, commenter)
         with st.expander(f"History ({len(t['history'])})"):
             for h in t["history"]:
@@ -204,19 +227,25 @@ def _update_form(conn, actor: Actor, t: dict, manage: bool) -> None:
                               format_func=pm.STATUS_LABEL.get, key=f"status-{t['id']}")
         progress = c2.slider("Progress you'd report", 0, 100, int(t["reported_progress"]), step=5,
                              key=f"progress-{t['id']}")
-        note = st.text_input("Note (required when you choose Blocked)", max_chars=1000, key=f"note-{t['id']}")
+        note = st.text_input("What did you do? (for Blocked: what's blocking it)", max_chars=1000,
+                             key=f"note-{t['id']}")
+        evidence = st.text_input("Evidence link (optional): a pull request, commit, doc or design",
+                                 max_chars=500, key=f"evidence-{t['id']}", placeholder="https://")
         if not manage and not t["parent_id"]:
             st.caption("When you've finished, choose Under review. The team leader marks it Completed.")
         if st.form_submit_button("Save update", type="primary"):
             def save():
                 version = t["version"]
-                if progress != t["reported_progress"]:
-                    pm.set_progress(conn, actor, t["id"], progress, version)
+                blocking = status == "blocked" and status != t["status"]
+                if progress != t["reported_progress"] or evidence.strip() or (note and not blocking
+                                                                             and status == t["status"]):
+                    pm.set_progress(conn, actor, t["id"], progress, version, "" if blocking else note, evidence)
                     version += 1
+                    used_note = not blocking
+                else:
+                    used_note = False
                 if status != t["status"]:
-                    pm.set_status(conn, actor, t["id"], status, version, note)
-                elif note:
-                    pm.add_comment(conn, actor, t["id"], note)
+                    pm.set_status(conn, actor, t["id"], status, version, "" if used_note else note)
             _do(save, "Saved.")
     if not manage:
         with st.expander("Ask for a different deadline"):
@@ -226,6 +255,32 @@ def _update_form(conn, actor: Actor, t: dict, manage: bool) -> None:
                 if st.form_submit_button("Send request"):
                     _do(lambda: pm.request_deadline(conn, actor, t["id"], new, reason),
                         "Request sent to the team leader.")
+
+
+def _verify_form(conn, actor: Actor, t: dict) -> None:
+    with st.expander("Verify progress (team leader)"):
+        st.caption("After looking at the work (or its evidence links), record how far it really is. This is kept "
+                   "separate from the assignee's own number. Approving the task in review sets it to 100%.")
+        with st.form(f"verify-{t['id']}", border=False):
+            start = t["verified_progress"] if t["verified_progress"] is not None else t["reported_progress"]
+            value = st.slider("Verified progress", 0, 100, int(start), step=5, key=f"verified-{t['id']}")
+            note = st.text_input("What you checked", max_chars=1000, key=f"verify-note-{t['id']}")
+            if st.form_submit_button("Save verified progress"):
+                _do(lambda: pm.verify_progress(conn, actor, t["id"], value, note, t["version"]),
+                    "Verified progress saved.")
+
+
+def _updates(t: dict) -> None:
+    if not t["updates"]:
+        return
+    with st.expander(f"Progress updates ({len(t['updates'])})", expanded=False):
+        for u in t["updates"]:
+            label = "verified" if u["kind"] == "verified" else "reported"
+            link = (f" · <a href='{ui.url(u['evidence_url'])}' target='_blank' rel='noopener noreferrer'>evidence</a>"
+                    if u["evidence_url"] else "")
+            badge = ui.pill(f"{label} {u['progress']}%", "ok" if label == "verified" else "quiet")
+            st.markdown(ui.row(f"{ui.e(u['author'])} {badge}", ui.e(u["note"]), "ok" if label == "verified" else "quiet",
+                               ui.e(ui.ago(u["created_at"])) + link), unsafe_allow_html=True)
 
 
 def _review(conn, actor: Actor, t: dict) -> None:
@@ -263,11 +318,13 @@ def _edit_form(conn, actor: Actor, t: dict) -> None:
         with st.form(f"edit-{t['id']}", border=False):
             title = st.text_input("Title", t["title"], max_chars=200)
             description = st.text_area("Description", t["description"], max_chars=4000)
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             priority = c1.selectbox("Priority", pm.PRIORITIES, index=pm.PRIORITIES.index(t["priority"]),
                                     format_func=pm.PRIORITY_LABEL.get)
             due = c2.date_input("Deadline", value=_date_value(t["due_date"]))
             estimate = c3.number_input("Estimate (hours)", 0.0, 1000.0, float(t["estimate_hours"] or 0), step=1.0)
+            weight = c4.selectbox("Size", pm.WEIGHTS, index=pm.WEIGHTS.index(t["weight"] or 1),
+                                  help="How big this task is. Completion % counts finished tasks by size.")
             if t["parent_id"]:
                 assigned, milestone, deps = None, t["milestone_id"], None
             else:
@@ -279,7 +336,7 @@ def _edit_form(conn, actor: Actor, t: dict) -> None:
                                       default=[d["id"] for d in t["dependencies"] if d["id"] in others])
             if st.form_submit_button("Save changes", type="primary"):
                 changes = {"title": title, "description": description, "priority": priority, "due_date": due,
-                           "estimate_hours": estimate or None, "milestone_id": milestone}
+                           "estimate_hours": estimate or None, "milestone_id": milestone, "weight": weight}
                 if assigned is not None:
                     changes.update(assignees=assigned, depends_on=deps)
                 _do(lambda: pm.update_task(conn, actor, t["id"], t["version"], **changes), "Task saved.")
@@ -310,3 +367,95 @@ def open_task_panel(conn, actor: Actor) -> None:
     task_id = st.session_state.get(OPEN_KEY)
     if task_id:
         task_panel(conn, actor, task_id)
+
+
+# ---- calendar and timeline ---------------------------------------------------------------------------------
+
+CAL_CSS = f"""<style>
+.tp-cal {{ width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .82rem; }}
+.tp-cal th {{ color: {ui.MUTED}; font-weight: 400; padding: .2rem; text-align: left; }}
+.tp-cal td {{ vertical-align: top; height: 5.4rem; border: 1px solid {ui.LINE}; padding: .25rem .3rem;
+  background: {ui.CARD}; overflow: hidden; }}
+.tp-cal td.tp-out {{ background: transparent; }}
+.tp-cal td.tp-today {{ outline: 2px solid {ui.ACCENT}; outline-offset: -2px; }}
+.tp-cal .tp-day {{ color: {ui.MUTED}; font-size: .75rem; }}
+.tp-cal .tp-ev {{ display: block; border-left: 3px solid {ui.LINE}; padding-left: .3rem; margin-top: .15rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.tp-cal .tp-ms {{ font-weight: 700; color: {ui.ACCENT}; }}
+</style>"""
+
+
+def month_picker(key: str) -> tuple[int, int]:
+    today = pm.today()
+    offset = st.session_state.get(f"{key}-month", 0)
+    c1, c2, c3, _ = st.columns([1, 2, 1, 4])
+    if c1.button("◀", key=f"{key}-prev", help="Previous month"):
+        offset -= 1
+    if c3.button("▶", key=f"{key}-next", help="Next month"):
+        offset += 1
+    st.session_state[f"{key}-month"] = offset
+    month0 = today.month - 1 + offset
+    year, month = today.year + month0 // 12, month0 % 12 + 1
+    c2.markdown(f"**{calendar_lib.month_name[month]} {year}**")
+    return year, month
+
+
+def calendar_view(conn, key: str, project_id: int | None = None, member: str | None = None) -> None:
+    """A month of deadlines (and milestones, on the project calendar). Red: overdue or blocked; green: done."""
+    year, month = month_picker(key)
+    days = pm.calendar(conn, year, month, project_id=project_id, member=member)
+    today = pm.today()
+    rows = []
+    for week in calendar_lib.Calendar(firstweekday=0).monthdayscalendar(year, month):
+        cells = []
+        for d in week:
+            if not d:
+                cells.append("<td class='tp-out'></td>")
+                continue
+            items = days.get(d, {"tasks": [], "milestones": []})
+            body = "".join(f"<span class='tp-ev tp-ms'>⚑ {ui.e(m['title'])}</span>" for m in items["milestones"])
+            body += "".join(f"<span class='tp-ev' style='border-left-color:{ui.TONE.get(tone(t), ui.LINE)}' "
+                            f"title='{ui.e(t['title'])}'>#{t['id']} {ui.e(t['title'])}</span>" for t in items["tasks"])
+            mark = " tp-today" if date(year, month, d) == today else ""
+            cells.append(f"<td class='{mark.strip()}'><span class='tp-day'>{d}</span>{body}</td>")
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    head = "".join(f"<th>{n}</th>" for n in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+    st.markdown(CAL_CSS + f"<table class='tp-cal'><tr>{head}</tr>{''.join(rows)}</table>", unsafe_allow_html=True)
+    count = sum(len(v["tasks"]) for v in days.values())
+    st.caption(f"{count} deadline{'s' if count != 1 else ''} this month. Open a task from the Board or List tab.")
+
+
+def timeline_view(tasks: list[dict], milestones: list[dict]) -> None:
+    """Gantt-style bars from start (or creation) to deadline. Tasks without a deadline aren't shown."""
+    rows = []
+    for t in tasks:
+        if not t["due_date"]:
+            continue
+        start = t["start_date"] or t["created_at"][:10]
+        if start > t["due_date"]:
+            start = t["due_date"]
+        end = (date.fromisoformat(t["due_date"]) + timedelta(days=1)).isoformat()   # bars include the deadline day
+        rows.append({"Task": f"#{t['id']} {t['title']}"[:60], "Start": start, "End": end, "Deadline": t["due_date"],
+                     "Status": pm.STATUS_LABEL[t["status"]], "Assigned to": ", ".join(t["assignees"]) or "nobody",
+                     "Progress": f"{t['reported_progress']}% reported"})
+    if not rows:
+        st.caption("No tasks with deadlines yet.")
+        return
+    colors = alt.Scale(domain=[pm.STATUS_LABEL[s] for s in pm.STATUSES],
+                       range=[ui.MUTED, ui.LINE, ui.ACCENT, "#7C8CE0", ui.CONFLICT, ui.AGREE])
+    frame = pd.DataFrame(rows)
+    order = list(frame.sort_values("Start")["Task"])
+    bars = alt.Chart(frame).mark_bar(cornerRadius=3, height=14).encode(
+        x=alt.X("Start:T", title=None), x2="End:T", y=alt.Y("Task:N", sort=order, title=None, axis=alt.Axis(labelOverlap=False, labelLimit=240)),
+        color=alt.Color("Status:N", scale=colors, legend=alt.Legend(orient="top", title=None)),
+        tooltip=["Task", "Status", "Assigned to", "Start", "Deadline", "Progress"])
+    today = alt.Chart(pd.DataFrame({"d": [pm.today().isoformat()]})).mark_rule(color=ui.CONFLICT, strokeDash=[4, 3]).encode(
+        x="d:T")
+    layers = [bars, today]
+    dated = [m for m in milestones if m["due_date"]]
+    if dated:
+        stones = pd.DataFrame([{"Milestone": m["title"], "Due": m["due_date"]} for m in dated])
+        layers.append(alt.Chart(stones).mark_rule(color=ui.ACCENT).encode(x="Due:T", tooltip=["Milestone", "Due"]))
+    st.altair_chart(alt.layer(*layers).properties(height=max(160, 30 * len(rows))), width="stretch")
+    st.caption("Bars run from the start date (or the day the task was created) to the deadline. The dashed red line is "
+               "today; blue lines are milestones.")

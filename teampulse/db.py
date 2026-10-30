@@ -334,6 +334,20 @@ CREATE TABLE IF NOT EXISTS pm_notifications (
     read_at     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pm_notifications ON pm_notifications(recipient, read_at);
+-- Progress updates with evidence. kind 'reported' is the assignee's own number; 'verified' is the leader's,
+-- and only a leader can write one. Nothing automatic (and no AI) ever writes a verified update.
+CREATE TABLE IF NOT EXISTS pm_progress_updates (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id       INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK (kind IN ('reported', 'verified')),
+    author_id     TEXT,
+    author        TEXT NOT NULL,
+    progress      INTEGER NOT NULL CHECK (progress BETWEEN 0 AND 100),
+    note          TEXT NOT NULL DEFAULT '',
+    evidence_url  TEXT,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pm_progress_task ON pm_progress_updates(task_id, id);
 """
 
 EVENT_COLUMNS = [
@@ -425,6 +439,11 @@ MIGRATIONS = [
     ("memory", "fact_date", "TEXT"),
     ("memory", "active", "INTEGER NOT NULL DEFAULT 1"),
     ("memory", "created_by", "TEXT"),
+    ("pm_tasks", "weight", "INTEGER NOT NULL DEFAULT 1"),        # 2.0: size used for completion %
+    ("pm_tasks", "verified_progress", "INTEGER"),                 # 2.0: set only by a leader
+    ("pm_tasks", "verified_by", "TEXT"),
+    ("pm_tasks", "verified_at", "TEXT"),
+    ("pm_notifications", "dedupe", "TEXT"),                      # 2.0: one reminder per task per day
 ]
 
 
@@ -433,6 +452,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    # Indexes on migrated columns can only be created once the columns exist.
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_notifications_dedupe ON pm_notifications(dedupe) "
+                 "WHERE dedupe IS NOT NULL")
     conn.commit()
 
 

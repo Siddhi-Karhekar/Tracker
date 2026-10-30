@@ -64,10 +64,31 @@ state. The rules are enforced on the server:
   sends it back with a note. A task with open subtasks can't be completed.
 - Only the leader can reopen completed work.
 
-**Reported vs measured progress.** The assignee reports a percentage. TeamPulse also measures one: the share
-of subtasks that are done, and 100% once the leader has completed the task. The spec calls the second one
-"verified" progress. When the reported number runs 40 points or more ahead of the measured one, the task is
-flagged ("reported 80% but only 33% of subtasks are done"). The flag describes the work, never the person.
+**Three progress numbers, kept apart.**
+
+- **Self-reported**: the assignee's own number. Each update can say what they did and link to evidence (a PR,
+  commit, doc or design; only `https://` links are accepted).
+- **Subtasks done**: counted, not estimated.
+- **Verified**: set only by the team leader after looking at the work. Approving a task in review sets it to
+  100%; reopening clears it. Nothing automatic, and no AI, ever writes a verified number.
+
+A task is flagged when the reported number runs 40 points or more ahead of the verified one (or of the
+subtask count, if nothing has been verified yet): "reported 80% but the leader verified 40%". The flag
+describes the work, never the person.
+
+**Completion %** counts finished tasks by **size** (1, 2, 3, 5 or 8, set by the leader). A task counts only
+once the leader has marked it Completed, and reported percentages are never averaged. The pages explain this
+next to the number, for the project, each milestone and each person's workspace.
+
+**Calendar and timeline.** The project board and each person's workspace have a month calendar of deadlines,
+with milestones on the project calendar. The board also has a timeline: a bar from each task's start date to its
+deadline, coloured by status, with lines for today and the milestones.
+
+**Deadline reminders.** Each assignee is reminded once a day about work due today or tomorrow, and about overdue
+work. The leaders are told once per overdue task. Reminders are sent by the poll loop and whenever someone opens
+My work. A reminder that was already sent today is never repeated (a unique key in the database ensures this).
+
+**Long lists** are shown 15 tasks at a time (8 per board column, 50 rows in the list view).
 
 **My work (each member's personal section).** Every member has their own page. It shows:
 
@@ -118,7 +139,8 @@ Checked in `teampulse/pm.py` on every call, before anything is written. Refusals
 | Assign and reassign, set dependencies | ✅ | ❌ | ❌ |
 | Move status: Backlog / To do / In progress / Under review / Blocked | ✅ | ✅ | ❌ |
 | Mark Completed, reopen | ✅ | ❌ (send for review) | ❌ |
-| Update reported progress | ✅ | ✅ | ❌ |
+| Update self-reported progress, with a note and an evidence link | ✅ | ✅ | ❌ |
+| Set verified progress | ✅ | ❌ | ❌ |
 | Add and tick subtasks | ✅ | ✅ (no deadlines or assignees on them) | ❌ |
 | Report a blocker | ✅ | ✅ | ❌ |
 | Request a deadline change | n/a (edits directly) | ✅ | ❌ |
@@ -144,11 +166,17 @@ erDiagram
     pm_tasks ||--o{ pm_comments : has
     pm_tasks ||--o{ pm_history : records
     pm_tasks ||--o{ pm_requests : "deadline requests"
+    pm_tasks ||--o{ pm_progress_updates : "progress evidence"
     pm_tasks |o--o{ pm_notifications : about
     users }o--|| members : "member_name links"
 ```
 
 - `pm_tasks.version` is used for optimistic locking.
+- `pm_tasks` keeps `reported_progress`, `verified_progress` (with `verified_by` and `verified_at`) and `weight`
+  as separate columns. `pm_progress_updates` keeps every update with its kind (`reported` or `verified`), note
+  and evidence link.
+- Columns added after a table first shipped are listed in `db.MIGRATIONS`, so older databases upgrade in place
+  on start.
 - `archived` soft-deletes a task.
 - Status and priority are restricted by CHECK constraints, and progress must be 0–100.
 - Notifications go to a member name, or to `@leaders` (one shared inbox for the team's leaders).
@@ -157,7 +185,7 @@ erDiagram
 
 ## 6. Tests
 
-`tests/test_pm.py` (21 tests) covers:
+`tests/test_pm.py` (29 tests) covers:
 
 - every leader-only action refused for members
 - members limited to their own tasks
@@ -170,8 +198,10 @@ erDiagram
 - the rate limit
 - workspace and dashboard contents
 - risk wording, archiving and page access
+- progress evidence and link validation, leader-only verified progress, completion by size
+- reminders sent once a day and never for completed work, the calendar, and upgrading a phase-1 database
 
-`tests/test_pm_ui.py` (11 tests) drives the real pages as a member and as the leader:
+`tests/test_pm_ui.py` (14 tests) drives the real pages as a member and as the leader:
 
 - a member's workspace shows only their tasks
 - the leader switches between workspaces
@@ -180,12 +210,118 @@ erDiagram
 - members don't see planning controls or the dashboard
 - the leader creates a task, approves a deadline request and approves finished work
 - hostile titles, comments and notifications never render as HTML on any of the three pages
+- the calendar and timeline tabs render
+- a member reports progress with evidence and the leader verifies it
+- a poisoned evidence link becomes a dead link
+
+`tests/e2e/test_browser_workflow.py` runs the whole assignment workflow in **real Chromium** against a running
+server. It's the plan's definition of done for task assignment:
+
+1. The leader signs in, creates a task and assigns it.
+2. The member signs in, sees the notification and the task in My work, opens it, moves it to In progress and
+   reports 30% with a note and an evidence link.
+3. The leader sees 30%, the evidence link and the history.
+4. The member opens someone else's task and finds no way to change it.
+
+Run it with `TEAMPULSE_E2E=1 python -m pytest tests/e2e`; CI runs it on every push.
 
 ## 7. Roadmap (later rounds)
 
 | Phase | Contents |
 |---|---|
-| 2. Views and collaboration | Calendar and timeline (Gantt) views, task links (URLs), file attachments as links, edit and delete own comments, email digest of notifications, drag-and-drop board (needs a custom component) |
+| 2. Views and collaboration | ~~Calendar and timeline views~~, ~~deadline reminders~~, ~~evidence links~~ (done in round 2). Still to do: edit and delete your own comments, email digest of notifications, drag-and-drop board (needs a custom component) |
 | 3. Sync | Link a planned task to a GitHub issue or Notion page. Show the source's status next to TeamPulse's and raise a conflict when they differ. Pre-fill tasks from existing issues. Count linked commits and PRs as evidence in measured progress. |
 | 4. AI project manager | Turn a goal or meeting notes into proposed tasks, subtasks and deadlines. Nothing is created until the leader confirms. A task assistant ("what should I do next?", "write an update for my task"). TeamPulse as an MCP server. |
 | 5. Proactive monitoring | Daily check for slipping tasks, overloaded people and stale blockers. It suggests; it never changes a task by itself. Weekly summary for the leader. |
+
+---
+
+## 8. The implementation plan, checked against the code
+
+The upgrade plan we received (five layers, a database design, MCP, AI architecture, five phases and a list of
+quality requirements) was written without seeing the code. Here is each point against what the repository
+actually contains.
+
+| Plan item | In TeamPulse | Status |
+|---|---|---|
+| Personal workspace: my tasks, deadlines, progress | My work page, one per member | Fully implemented |
+| Team workspace: members, workload, collaboration | Team dashboard (workload), comments, @mentions | Fully implemented |
+| Project workspace: milestones, Kanban, calendar, timeline | Project board: Board, List, Calendar, Timeline tabs | Fully implemented (no drag-and-drop) |
+| Auth and RBAC | Leader and member roles, server-side checks, audit log | Fully implemented |
+| Assignment, deadline, approval workflows | Assignees, deadline requests, review and approval | Fully implemented |
+| Notifications and activity history | In-app notifications, reminders, per-task history | Fully implemented in the app; email not implemented |
+| The project database is the source of truth | `pm_*` tables are never written by the GitHub or Notion pollers | Fully implemented |
+| User, Task, TaskAssignment, Subtask, TaskDependency, Milestone, TaskComment, TaskActivity, ProgressUpdate, Notification, AuditLog | `users`, `pm_tasks`, `pm_assignees`, `pm_tasks.parent_id`, `pm_dependencies`, `pm_milestones`, `pm_comments`, `pm_history`, `pm_progress_updates`, `pm_notifications`, `audit_log` | Fully implemented |
+| Team, TeamMember, ProjectMember | One deployment is one team: `members` and `users.role` cover membership. Every member sees every project. | Partially implemented (by design for one team) |
+| Attachment | Evidence **links** on progress updates. No file uploads: they would need storage and malware checks, and student work already lives in GitHub and Drive. | Partially implemented |
+| Integration entity | Connections are set in `.env` and checked on the Data sources page | Partially implemented |
+| Separate status, self-reported progress, verified progress, review status | `status` (with Under review), `reported_progress`, `verified_progress` | Fully implemented |
+| Completion not an average of percentages | Completion by size, explained on the page | Fully implemented |
+| Selective MCP gateway with read and write tools | Assessed in section 2; deferred to phase 4 | Not implemented |
+| LangGraph supervisor and specialist agents | Supervisor plus five specialists (retrieval, blockers, conflicts, contributions, memory) and a Verifier | Fully implemented |
+| Only relevant agents per question | The supervisor's router picks specialists per question (keyword fallback when the AI is unavailable) | Fully implemented |
+| Task-planning agent, reporting agent, human approval with checkpoints | Phase 4 (AI project manager) | Not implemented |
+| PostgreSQL + pgvector, background jobs | SQLite (WAL) and ChromaDB; the poll loop does scheduled work. Section 1 explains why. | Not implemented (not needed at this size) |
+| Modern frontend (React, Tailwind) | Streamlit | Not implemented (see section 1) |
+| Pagination, indexes | Pages of 15, 8 and 50; indexes on project, status, due date, assignee, notifications | Fully implemented |
+| No repeated LLM calls for deterministic work | Project management uses no AI; the agents cache AI replies | Fully implemented |
+| Typed request and response schemas | Plain dicts; every input is validated in `pm.py` | Partially implemented |
+| Database migrations | `db.MIGRATIONS` adds columns in place; tested | Fully implemented |
+| Centralised error handling | `PMError` and `PermissionDenied` carry safe messages; one `_do()` shows them on the pages | Fully implemented |
+| File-upload restrictions | No uploads exist; links are `https://` only | n/a |
+| Cross-team data leakage | One team per deployment, so there's no second team's data to leak | n/a (single team) |
+| Human approval for consequential AI actions | No AI action changes tasks yet. Phase 4 requires confirmation. | n/a until phase 4 |
+| End-to-end browser testing | `tests/e2e` (Playwright) in CI | Fully implemented |
+
+**Needs external credentials:** GitHub, Notion and Discord ingestion, and the AI answers (Groq, Gemini, or a
+local Ollama). **Needs paid infrastructure:** nothing. Everything runs on free tiers or on your own computer.
+
+## 9. Round 2 report
+
+**Features completed:**
+
+- progress updates with a note and an evidence link
+- leader-only verified progress, kept separate from self-reported progress
+- completion % by task size, explained on the page
+- calendar views (project and personal) and a project timeline
+- once-a-day deadline reminders (assignees and leaders), from the poll loop and on page load
+- pagination of long lists
+- task size in the create and edit forms
+- realistic start dates in the demo
+- a real-browser end-to-end test in CI
+
+**Files created:** `tests/e2e/test_browser_workflow.py`, `tests/e2e/conftest.py`, `tests/e2e/__init__.py`.
+
+**Files modified:**
+
+- `teampulse/db.py`, `teampulse/pm.py`, `teampulse/pm_ui.py`
+- `views/board.py`, `views/workspace.py`, `views/dashboard.py`
+- `teampulse/ingest/poll.py`, `teampulse/seed_demo.py`
+- `tests/test_pm.py`, `tests/test_pm_ui.py`
+- `.github/workflows/ci.yml`
+- `README.md`, this document
+
+**Database changes:**
+
+- new table `pm_progress_updates`
+- new columns `pm_tasks.weight`, `verified_progress`, `verified_by`, `verified_at` and `pm_notifications.dedupe`,
+  added through migrations
+- a unique partial index on `pm_notifications(dedupe)`
+
+**Tests executed:**
+
+- `python -m pytest -q`: **233 passed**, 1 skipped (the browser test, which needs `TEAMPULSE_E2E=1`)
+- `TEAMPULSE_E2E=1 python -m pytest tests/e2e`: **1 passed**
+- `ruff` (CI rules): clean
+
+**Known issues:**
+
+- The board has no drag-and-drop.
+- Notifications are in the app only.
+- One `@leaders` inbox is shared by all leaders.
+- The timeline uses the creation date when a task has no start date.
+- Reminders depend on the poll loop running or someone opening My work.
+
+**Remaining:** the rest of phase 2 (edit and delete own comments, email digest), then phase 3 (GitHub/Notion
+links for planned tasks), phase 4 (AI project manager with confirmation, MCP server) and phase 5 (proactive
+monitoring).

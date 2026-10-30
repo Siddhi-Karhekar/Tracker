@@ -23,6 +23,13 @@ def run_once(conn, scan_chat: bool = False, state: dict | None = None) -> None:
         maintenance.daily(conn, state)   # retention purge; daily backup if TEAMPULSE_BACKUP_DIR is set
     except Exception as exc:
         log.error("Maintenance failed: %s", exc)
+    try:
+        from teampulse import pm
+        sent = pm.send_reminders(conn)   # due today / tomorrow / overdue, at most once a day per task and person
+        if sent:
+            log.info("Sent %d deadline reminder(s)", sent)
+    except Exception as exc:
+        log.error("Deadline reminders failed: %s", exc)
     for name, poller in (("GitHub", github_poller), ("Notion", notion_poller)):
         try:
             poller.poll_all(conn)
