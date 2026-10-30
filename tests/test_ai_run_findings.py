@@ -197,3 +197,47 @@ def test_linking_mistakes_show_what_the_ai_was_offered_and_said(team):
     assert errors and all("candidates" in e for e in errors)
     asked = [e for e in errors if isinstance(e["candidates"], list)]
     assert asked and all(e["answer"] is None for e in asked)      # the AI said "none": visible, not silent
+
+
+def test_link_answers_by_title_cannot_be_off_by_one():
+    """Real run (gpt-oss-20b): the right task was option A three times and the AI said "B"."""
+    from teampulse.tasks import _choice_index
+    opts = ["Payment integration (Razorpay test mode)", "Food recommendation model", "Menu API"]
+    assert _choice_index("Payment integration (Razorpay test mode)", opts) == 0
+    assert _choice_index("payment integration", opts) == 0                 # shortened title
+    assert _choice_index("Deploy on Render", opts) == -1                    # not in this message's list
+    assert _choice_index("A", opts) == 0                                    # letters still understood
+
+
+def test_word_overlap_puts_the_right_task_on_the_shortlist(team):
+    """“maine report ka introduction likh diya” never had “Project Report draft” among its candidates."""
+    conn, index = team
+    from teampulse.tasks import _task_candidates
+    titles = {r[0]: r[1] for r in conn.execute("SELECT id, title FROM tasks")}
+    cands = [titles[c] for c in _task_candidates(conn, index, "maine report ka introduction likh diya hai")]
+    assert cands and "Report" in cands[0]
+    deploy = [titles[c] for c in _task_candidates(conn, index, "deploy kab karenge? final review 18 din me hai")]
+    assert "Deploy" in deploy[0]
+
+
+def test_linking_with_an_ai_that_answers_titles(team):
+    conn, index = team
+    from teampulse.eval import linking
+    from teampulse.tasks import title_similarity  # noqa: F401
+    answers = {"payment": "Payment integration", "canteen": "Food recommendation model",
+               "recommendation model": "Food recommendation model", "pagination": "Order history screen",
+               "deploy": "Deploy on Render", "report": "Project Report draft", "ma'am": "Food recommendation model"}
+
+    class TitleAI:
+        def chat(self, messages, json_mode=False, temperature=0.0):
+            out = []
+            for block in messages[-1]["content"].split("\n\nMessage "):
+                n = int(__import__("re").match(r"(?:Message )?(\d+)", block).group(1))
+                body = block.split("\n")[1].lower()
+                pick = next((t for k, t in answers.items() if k in body), None)
+                out.append({"message": n, "task": pick})
+            return LLMReply(json.dumps({"links": out}), "fake")
+
+    key = str(conn.execute("PRAGMA database_list").fetchone()[2]).replace("t.db", "demo_answer_key.json")
+    res, _ = linking.run(conn, index, TitleAI(), key)
+    assert res["+ LLM"]["accuracy"] >= 0.9, res["+ LLM"]["errors"]

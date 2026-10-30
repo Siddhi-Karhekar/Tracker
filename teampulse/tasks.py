@@ -34,6 +34,26 @@ def _reply_number(value) -> int | None:
     return int(m.group(0)) if m else None
 
 
+def _choice_index(value, options: list[str]) -> int:
+    """The model's pick as an index into this message's options: an exact or close title (preferred: letters
+    are easy to get off by one, as a real run showed) or a letter. Anything not in the list → -1."""
+    if not isinstance(value, str) or not value.strip():
+        return -1
+    idx = _letter_index(value)
+    if idx >= 0 and len(value.strip()) <= 4:
+        return idx
+    text = re.sub(r"^\s*\(?[A-H]\)\s*", "", value).strip().lower()
+    for i, title in enumerate(options):
+        if title.lower() == text:
+            return i
+    partial = [i for i, title in enumerate(options) if len(text) >= 6 and (text in title.lower() or title.lower() in text)]
+    if len(partial) == 1:   # "Payment integration" for "Payment integration (Razorpay test mode)"
+        return partial[0]
+    scores = [title_similarity(text, title) for title in options]
+    best = max(range(len(options)), key=scores.__getitem__) if options else -1
+    return best if best >= 0 and scores[best] >= 0.8 else -1
+
+
 def _letter_index(value) -> int:
     """"A", "a", "A)", "(B)", "Option C" → 0, 0, 0, 1, 2. Anything else (null, "none") → -1."""
     if not isinstance(value, str):
@@ -72,9 +92,11 @@ issues. Titles may be worded differently or mix Hindi and English. Answer null i
 Return ONLY JSON: {"matches": [{"item": 1, "match": "A" or null}, ...]}"""
 
 LINK_PROMPT = """Each chat message below comes from a student team's Discord (often Hinglish). Pick the task
-it is about from its candidate list, or null if it isn't about any listed task (e.g. general chat, a
-decision about tools, a different task). "login wala page" = the login page task, etc.
-Return ONLY JSON: {"links": [{"message": 1, "task": "A" or null}, ...]}"""
+it is about from that message's own candidate list, or null if it isn't about any listed task (e.g. general
+chat, a decision about tools, a different task). "login wala page" = the login page task, "data nahi mila"
+for a model = the model task, "re-review kar de" on a PR = that PR's task, etc.
+For "task", copy the task's title exactly as written in the list (not its letter).
+Return ONLY JSON: {"links": [{"message": 1, "task": "exact task title" or null}, ...]}"""
 
 
 class Registry:
@@ -218,11 +240,22 @@ class Registry:
 
 # ---- chat → task linking (upgrade of the Week 5 scanner's links) -----------------------------------
 
+STOPWORDS = {"with", "from", "this", "that", "kar", "karo", "diya", "hai", "nahi", "kya", "kab", "the", "and", "for"}
+
+
 def _task_candidates(conn, index, text: str, k: int = 5) -> list[str]:
-    """Shortlist task ids for a message: semantic search over issues + Notion tasks, mapped to tasks."""
+    """Shortlist task ids for a message: tasks whose title shares a word with it ("report", "deploy") first,
+    then semantic search over issues + Notion tasks. Semantic search alone missed "report ka introduction
+    likh diya" → "Project Report draft" with the multilingual model."""
     if index is None:
         return []
+    words = {w for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in STOPWORDS}
     out = []
+    for row in conn.execute("SELECT id, title FROM tasks"):
+        title_words = set(re.findall(r"[a-z]{4,}", (row["title"] or "").lower()))
+        if words & title_words and row["id"] not in out:
+            out.append(row["id"])
+    out = out[:k]
     for hit in index.search(text, k=k * 2, sources=["github", "notion"], kinds=["issue", "notion_page"]):
         row = conn.execute("SELECT task_id FROM task_links WHERE event_id = ?", (hit["event_id"],)).fetchone()
         if row and row["task_id"] not in out:
@@ -287,7 +320,7 @@ def llm_choose(conn: sqlite3.Connection, index, llm: LLM, rows: list, debug: dic
             if debug is not None:
                 debug[r["event_id"]]["answer"] = answers.get(i, "(no answer for this message)")
             if i in answers:
-                idx = _letter_index(answers[i])
+                idx = _choice_index(answers[i], [titles.get(c, c) for c in cands])
                 choices[r["event_id"]] = cands[idx] if 0 <= idx < len(cands) else None
     return choices, calls
 
