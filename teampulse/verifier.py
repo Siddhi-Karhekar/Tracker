@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from teampulse.agents.retrieval import CITATION
+from teampulse.agents.retrieval import CITATION, format_item
 from teampulse.llm import LLM, extract_json
 
 JUDGE_PROMPT = """You check an AI assistant's answer against its sources. For each numbered statement you get
@@ -62,7 +62,9 @@ def verify(answer: str, evidence: list[dict], llm: LLM | None = None) -> dict:
         return {"statements": [], "uncited": len(uncited), "faithfulness": None, "method": "none"}
 
     def source_text(s):
-        return "\n".join(f"[{n}] {evidence[n - 1].get('text', '')}" for n in s["cites"])
+        # The whole item, header included (status, author, assignees, dates): the answer was written from it,
+        # so e.g. "marked Done in Notion" is checked against status=Done, not just the page's text.
+        return "\n".join(format_item(n, evidence[n - 1]) for n in s["cites"])
 
     method, verdicts = "lexical", {}
     if llm is not None:

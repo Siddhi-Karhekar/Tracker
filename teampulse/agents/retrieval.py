@@ -82,24 +82,22 @@ def _evidence_item(conn, row: sqlite3.Row, why: str, score: float | None) -> dic
 
 
 def format_evidence(evidence: list[dict]) -> str:
-    blocks = []
-    for n, e in enumerate(evidence, 1):
-        meta = [f"{e['source']} {e['kind']}", e["date"]]
-        if e["author"]:
-            meta.append(f"by {e['author']}")
-        if e["channel"]:
-            meta.append(f"in {e['channel']}")
-        if e["status"]:
-            meta.append(f"status={e['status']}")
-        if e["assignees"]:
-            meta.append("assigned=" + ",".join(e["assignees"]))
-        if e["due"]:
-            meta.append(f"due={e['due']}")
-        head = f"[{n}] ({'; '.join(meta)})"
-        if e["parent"]:
-            head += f" re: {e['parent']}"
-        blocks.append(f"{head}\n{e['text']}")
-    return "\n\n".join(blocks)
+    return "\n\n".join(format_item(n, e) for n, e in enumerate(evidence, 1))
+
+
+def format_item(n: int, e: dict) -> str:
+    """One evidence item exactly as the answering agent sees it: header (source, date, author, status,
+    assignees, due date) and text. The Verifier and RAGAS get the same, so they judge what the agent saw."""
+    meta = [f"{e.get('source', '')} {e.get('kind', '')}".strip(), e.get("date") or ""]
+    for label, key in (("by ", "author"), ("in ", "channel"), ("status=", "status"), ("due=", "due")):
+        if e.get(key):
+            meta.append(f"{label}{e[key]}")
+    if e.get("assignees"):
+        meta.append("assigned=" + ",".join(e["assignees"]))
+    head = f"[{n}] ({'; '.join(m for m in meta if m)})"
+    if e.get("parent"):
+        head += f" re: {e['parent']}"
+    return f"{head}\n{e.get('text', '')}"
 
 
 log = logging.getLogger("teampulse.retrieval")

@@ -287,7 +287,8 @@ def eval_end_to_end(agent, questions, llm, offline) -> tuple[dict, list[dict]]:
                      "latency": round(time.time() - started, 2), "answer": result.get("answer", "")})
         evidence = result.get("evidence", [])
         cited = [evidence[n - 1] for n in result.get("cited", []) if 1 <= n <= len(evidence)]
-        contexts = [e["text"] for e in (cited or evidence[:8]) if e.get("text")]
+        from teampulse.agents.retrieval import format_item
+        contexts = [format_item(i, e) for i, e in enumerate(cited or evidence[:8], 1) if e.get("text")]
         ragas_rows.append({"id": q["id"], "agent": "supervisor", "user_input": q["question"],
                            "response": re.sub(r"\[\d+\]", "", result.get("answer", "")).strip(),
                            "retrieved_contexts": contexts,

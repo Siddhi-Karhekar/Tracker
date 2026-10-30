@@ -119,3 +119,27 @@ def test_evaluations_stop_when_no_ai_works(monkeypatch, capsys):
     with pytest.raises(SystemExit, match="only measure the fallback rules"):
         llm_module.require_working(LLM(providers=["groq"]))
     assert "GROQ_MODEL" in capsys.readouterr().out
+
+
+def test_the_verifier_sees_status_author_and_dates_not_just_text():
+    """Regression: the judge got only each source's text, so true statements about its status, author or
+    due date ("marked Done in Notion") were marked unsupported. Real AI run: faithfulness 55%."""
+    import json as _json
+
+    from teampulse import verifier
+    from teampulse.llm import LLMReply
+    notion = {"event_id": "notion:task-login", "source": "notion", "kind": "notion_page", "author": "Neha",
+              "status": "Done", "assignees": ["Riya"], "due": "2026-10-25", "channel": None, "date": "2026-10-08 10:00",
+              "parent": None, "text": "Login with college email OTP (#12)\n[x] UI [x] OTP email [x] Session handling"}
+
+    class Judge:   # says "supported" only if the fact it needs is in what it was shown
+        def chat(self, messages, json_mode=False, temperature=0.0):
+            shown = messages[-1]["content"]
+            ok = "status=Done" in shown and "assigned=Riya" in shown
+            return LLMReply(_json.dumps({"items": [{"statement": 1, "verdict": "supported" if ok else "unsupported"}]}),
+                            "fake")
+
+    out = verifier.verify("Login is marked Done in Notion and assigned to Riya [1].", [notion], Judge())
+    assert out["method"] == "llm" and out["faithfulness"] == 1.0
+    lexical = verifier.verify("Login is marked Done in Notion and assigned to Riya [1].", [notion], None)
+    assert lexical["statements"][0]["verdict"] == "supported"        # the offline check benefits too
