@@ -77,6 +77,23 @@ def extract_json(text: str) -> dict:
         return json.loads(match.group(0))
 
 
+DAILY = re.compile(r"per day|\bTPD\b|\bRPD\b|daily", re.I)
+MAX_RETRY_WAIT = 60.0
+
+
+def retry_delay(exc) -> float:
+    """Seconds the provider asks us to wait, from its message ("try again in 1m41s", "retryDelay": "23s",
+    "retry in 7.5s"), else a short default for 429/503."""
+    text = str(exc)
+    m = re.search(r"try again in (?:(\d+)m)?\s*(\d+(?:\.\d+)?)s", text) or \
+        re.search(r"retry(?:Delay|_delay| in)\W*(\d+(?:\.\d+)?)s", text, re.I)
+    if m and m.re.pattern.startswith("try again"):
+        return int(m.group(1) or 0) * 60 + float(m.group(2))
+    if m:
+        return float(m.group(1))
+    return 8.0
+
+
 def hint(name: str, model: str, status: int | None) -> str:
     """What to do about a provider error, in one line."""
     env_model = PROVIDERS[name][2]
@@ -114,6 +131,7 @@ class LLM:
         self.stats = {"calls": 0, "cached": 0, "failed": 0, "unanswered": 0, "prompt_tokens": 0,
                       "completion_tokens": 0, "seconds": 0.0}
         self._dead: dict[str, str] = {}   # providers that can't work (bad key, unknown model): skipped from then on
+        self._sleep = time.sleep
 
     def reset_stats(self) -> dict:
         old, self.stats = self.stats, {k: 0 if k != "seconds" else 0.0 for k in self.stats}
@@ -181,10 +199,9 @@ class LLM:
                     # A reasoning model: keep its thinking short and out of the reply, and leave room for it.
                     kwargs["extra_body"] = {"reasoning_effort": "low", "include_reasoning": False}
                     max_tokens = max(max_tokens, 4000)
-                self._throttle()
                 started = time.time()
-                response = client.chat.completions.create(
-                    model=model, messages=messages, temperature=temperature, max_tokens=max_tokens, **kwargs)
+                response = self._create(client, name, model=model, messages=messages, temperature=temperature,
+                                        max_tokens=max_tokens, **kwargs)
                 text = normalise(response.choices[0].message.content or "")
                 if not text.strip():
                     raise LLMError("empty reply (the model may have run out of tokens)")
@@ -197,7 +214,7 @@ class LLM:
             except Exception as exc:  # rate limit, network, bad model name... try the next provider
                 self.stats["failed"] += 1
                 status = getattr(exc, "status_code", None)
-                daily = status == 429 and re.search(r"per day|\bTPD\b|\bRPD\b|daily", str(exc), re.I)
+                daily = status == 429 and DAILY.search(str(exc))
                 if status in (401, 403, 404) or daily:   # won't fix itself soon: stop trying it in this run
                     self._dead[name] = f"{type(exc).__name__} {status}: {hint(name, model, status)}"
                     log.warning("%s disabled for this run: %s", name, self._dead[name])
@@ -213,6 +230,23 @@ class LLM:
             return LLMReply(text, name)
         self.stats["unanswered"] += 1
         raise LLMError("No LLM provider worked. " + " | ".join(errors))
+
+    def _create(self, client, name: str, **request):
+        """One request, with one patient retry for temporary refusals: a per-minute rate limit (429) or an
+        overloaded server (503). Free tiers (Gemini especially) refuse bursts; waiting the suggested time
+        usually works, where retrying at once never does. Daily quotas aren't retried (see chat())."""
+        for attempt in (1, 2):
+            self._throttle()
+            try:
+                return client.chat.completions.create(**request)
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                wait = retry_delay(exc)
+                temporary = status in (429, 503) and not DAILY.search(str(exc)) and wait <= MAX_RETRY_WAIT
+                if attempt == 2 or not temporary:
+                    raise
+                log.info("%s busy (%s); waiting %.0f s and retrying once", name, status, wait)
+                self._sleep(wait)
 
     def check(self) -> list[dict]:
         """Try each configured provider once (not cached). For evaluations: stop early with a clear reason

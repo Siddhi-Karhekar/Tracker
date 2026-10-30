@@ -114,3 +114,60 @@ def test_the_evaluation_stops_once_no_ai_provider_is_left(tmp_path):
                         embedder=HashEmbedder(), llm=OutOfQuota())
     assert list(result["results"]) == ["router"]                   # stopped after the first step
     assert result["ai_failures"]["retrieval"] == "not run" and not result["passed"]
+
+
+class _Status(Exception):
+    def __init__(self, status, text=""):
+        super().__init__(f"Error code: {status} {text}")
+        self.status_code = status
+
+
+def _provider(*outcomes):
+    from types import SimpleNamespace
+    seq, calls = list(outcomes), []
+
+    def create(**kw):
+        calls.append(kw)
+        out = seq.pop(0)
+        if isinstance(out, Exception):
+            raise out
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=out))], usage=None)
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))), calls
+
+
+@pytest.mark.parametrize("refusal,wait", [(_Status(429, '{"retryDelay": "23s"}'), 23.0), (_Status(503), 8.0)])
+def test_a_busy_free_tier_is_waited_for_once(refusal, wait):
+    """Real run: Gemini's free tier answered 503 / 429 to bursts and every request failed at once."""
+    client, calls = _provider(refusal, "fine")
+    llm = LLM(providers=["gemini"])
+    llm._clients = {"gemini": (client, "gemini-3.8-flash")}
+    waited = []
+    llm._sleep = waited.append
+    assert llm.chat([{"role": "user", "content": "hi"}]).text == "fine"
+    assert waited == [wait] and len(calls) == 2
+
+
+def test_a_daily_quota_is_not_waited_for():
+    client, calls = _provider(_Status(429, "on tokens per day (TPD)"))
+    llm = LLM(providers=["groq"])
+    llm._clients = {"groq": (client, "m")}
+    llm._sleep = lambda s: (_ for _ in ()).throw(AssertionError("should not wait"))
+    with pytest.raises(Exception):
+        llm.chat([{"role": "user", "content": "hi"}])
+    assert len(calls) == 1
+
+
+def test_the_evaluation_stops_after_a_step_with_no_ai_answer(tmp_path):
+    """Gemini kept refusing (never 'out for the day'), and the run went through every step on rules."""
+    from teampulse.eval import agents
+
+    class Refusing(LLM):
+        def __init__(self):
+            super().__init__(None, providers=["gemini"])
+            client, _ = _provider(*[_Status(429)] * 200)
+            self._clients = {"gemini": (client, "m")}
+            self._sleep = lambda s: None
+
+    result = agents.run(offline=False, folder=tmp_path, only=["router", "retrieval", "memory"],
+                        embedder=HashEmbedder(), llm=Refusing())
+    assert list(result["results"]) == ["router"] and result["ai_failures"]["retrieval"] == "not run"

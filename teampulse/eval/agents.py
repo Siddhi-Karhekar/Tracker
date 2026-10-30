@@ -348,6 +348,7 @@ def run(offline: bool, folder: Path, only: list[str] | None = None, embedder=Non
             continue
         started = time.time()
         failed_before = getattr(llm, "stats", {}).get("unanswered", 0)
+        answered_before = getattr(llm, "stats", {}).get("calls", 0)
         if name == "end_to_end":
             results[name], ragas_rows = eval_end_to_end(agent, questions, llm, offline)
         else:
@@ -361,7 +362,10 @@ def run(offline: bool, folder: Path, only: list[str] | None = None, embedder=Non
         print(f"  {name:14} {json.dumps(results[name]['metrics'], ensure_ascii=False)}{flag}")
         working = [p for p in getattr(llm, "providers", []) if p in PROVIDERS and p not in getattr(llm, "_dead", {})
                    and llm._client(p)]
-        if not offline and failed and not working:   # every provider is out (e.g. daily quota): stop here
+        answered = getattr(llm, "stats", {}).get("calls", 0) - answered_before
+        # Stop when every provider is out for the day, or when a whole step got no AI answer at all
+        # (providers refusing every request): carrying on would only measure the fallback rules.
+        if not offline and failed and (not working or not answered):
             skipped = [a for a in AGENTS if a in wanted and a not in results]
             if skipped:
                 print(f"  No AI provider is left, so these weren't run: {', '.join(skipped)}")
