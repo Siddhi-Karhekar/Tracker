@@ -55,7 +55,9 @@ def predict(conn: sqlite3.Connection, index, llm: LLM | None, gold: dict) -> dic
             need_llm.append({"event_id": event_id, "body": msg.text, "task_hint": hint, "author_name": msg.author,
                              "channel": msg.channel, "created_at": msg.created_at.isoformat()})
     if llm is not None and index is not None and need_llm:
-        choices, _ = llm_choose(conn, index, llm, need_llm)
+        debug: dict = {}
+        choices, _ = llm_choose(conn, index, llm, need_llm, debug=debug)
+        out["_debug"] = debug
         out["+ LLM"].update({e: choices.get(e) for e in (r["event_id"] for r in need_llm)})
     else:
         out.pop("+ LLM")
@@ -78,7 +80,12 @@ def run(conn: sqlite3.Connection, index, llm: LLM | None, key_path: str | None =
     gold = gold_from(conn, key_path)
     if not gold:
         raise SystemExit("No gold links. Correct some links on the Tasks page, or pass --key.")
-    results = {name: score(gold, pred) for name, pred in predict(conn, index, llm, gold).items()}
+    preds = predict(conn, index, llm, gold)
+    debug = preds.pop("_debug", {})
+    results = {name: score(gold, pred) for name, pred in preds.items()}
+    if "+ LLM" in results:   # show what the AI was offered and what it said, next to each mistake
+        for e in results["+ LLM"]["errors"]:
+            e.update(debug.get(e["id"], {"candidates": "(not sent to the AI: linked by #ref or no candidates)"}))
     texts = {r[0]: r[1] for r in conn.execute("SELECT id, body FROM events WHERE source='discord'")}
     lines = ["# Chat → task linking evaluation", "", f"{datetime.now():%Y-%m-%d %H:%M} · {len(gold)} gold links", "",
              "| Method | Messages | Accuracy | Precision (links made) | Recall (links needed) |", "|---|---|---|---|---|"]

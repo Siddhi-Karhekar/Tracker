@@ -171,3 +171,29 @@ def test_the_evaluation_stops_after_a_step_with_no_ai_answer(tmp_path):
     result = agents.run(offline=False, folder=tmp_path, only=["router", "retrieval", "memory"],
                         embedder=HashEmbedder(), llm=Refusing())
     assert list(result["results"]) == ["router"] and result["ai_failures"]["retrieval"] == "not run"
+
+
+def test_blocker_answers_include_the_replies_to_a_blocker(team):
+    """“Who helped with Kabir's data problem?” goes to the Blocker agent; Neha's reply holds the answer."""
+    conn, index = team
+    from teampulse.agents.blockers import BlockerAgent
+    data = BlockerAgent(conn, llm=LLM(conn, providers=["none"]), index=index).collect_for(["blocker"], 60)
+    kabir = next(it for it in data["items"] if data["evidence"][it["n"] - 1]["event_id"] == "discord:900004")
+    assert [data["evidence"][r - 1]["event_id"] for r in kabir["replies"]] == ["discord:900015"]
+
+
+def test_linking_mistakes_show_what_the_ai_was_offered_and_said(team):
+    conn, index = team
+    from teampulse.eval import linking
+
+    class SaysNone:
+        def chat(self, messages, json_mode=False, temperature=0.0):
+            n = messages[-1]["content"].count("\nMessage ") + 1
+            return LLMReply(json.dumps({"links": [{"message": i, "task": None} for i in range(1, n + 1)]}), "fake")
+
+    key = str(conn.execute("PRAGMA database_list").fetchone()[2]).replace("t.db", "demo_answer_key.json")
+    res, _ = linking.run(conn, index, SaysNone(), key)
+    errors = res["+ LLM"]["errors"]
+    assert errors and all("candidates" in e for e in errors)
+    asked = [e for e in errors if isinstance(e["candidates"], list)]
+    assert asked and all(e["answer"] is None for e in asked)      # the AI said "none": visible, not silent

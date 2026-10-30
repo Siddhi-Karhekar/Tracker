@@ -244,7 +244,7 @@ def apply_feedback(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
-def llm_choose(conn: sqlite3.Connection, index, llm: LLM, rows: list) -> tuple[dict, int]:
+def llm_choose(conn: sqlite3.Connection, index, llm: LLM, rows: list, debug: dict | None = None) -> tuple[dict, int]:
     """Ask the LLM which task each message is about, from a semantic shortlist. Writes nothing.
 
     rows need: event_id, body, task_hint, author_name, channel, created_at.
@@ -258,6 +258,8 @@ def llm_choose(conn: sqlite3.Connection, index, llm: LLM, rows: list) -> tuple[d
             work.append((r, cands[:5]))
         else:
             choices[r["event_id"]] = None
+        if debug is not None:   # for the evaluation: what the AI was offered
+            debug[r["event_id"]] = {"candidates": [titles.get(c, c) for c in cands[:5]], "answer": None}
     calls = 0
     for start in range(0, len(work), LINK_BATCH):
         batch = work[start:start + LINK_BATCH]
@@ -282,6 +284,8 @@ def llm_choose(conn: sqlite3.Connection, index, llm: LLM, rows: list) -> tuple[d
             log.warning("Chat link check failed (%s); keeping scanner links", exc)
             break
         for i, (r, cands) in enumerate(batch, 1):
+            if debug is not None:
+                debug[r["event_id"]]["answer"] = answers.get(i, "(no answer for this message)")
             if i in answers:
                 idx = _letter_index(answers[i])
                 choices[r["event_id"]] = cands[idx] if 0 <= idx < len(cands) else None

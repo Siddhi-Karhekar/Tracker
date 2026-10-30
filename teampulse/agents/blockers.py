@@ -116,9 +116,13 @@ class BlockerAgent:
                 state = ""
             n = add(message, f"chat {s['type']}")
             evidence[n - 1]["status"] = s["type"] + (f", {state}" if state else "")
+            # Direct replies often say who is helping or whether it got fixed ("main ma'am se baat kar rahi hu").
+            replies = [add(r, f"reply to [{n}]") for r in self.conn.execute(
+                "SELECT * FROM events WHERE parent_id = ? ORDER BY created_at LIMIT 3", (message["id"],))]
             item = {"n": n, "type": s["type"], "state": state, "summary": s["summary"], "task": None,
                     "author": message["author_name"], "date": evidence[n - 1]["date"],
-                    "classifier": s["classifier"], "link_method": s["link_method"], "link_score": s["link_score"]}
+                    "classifier": s["classifier"], "link_method": s["link_method"], "link_score": s["link_score"],
+                    "replies": replies}
             if task is not None:
                 item["task"] = add(task, f"linked task ({s['link_method']})")
                 evidence[item["task"] - 1]["why"] = f"task linked to [{n}] via {s['link_method']}"
@@ -164,7 +168,9 @@ class BlockerAgent:
                     "trace": trace + [{"step": "answer", "ms": 0, "provider": "none"}]}
         facts = "\n".join(
             f"- [{it['n']}] {it['type']}" + (f" ({it['state']})" if it["state"] else "")
-            + (f", task [{it['task']}]" if it["task"] else ", no linked task") for it in data["items"])
+            + (f", task [{it['task']}]" if it["task"] else ", no linked task")
+            + (f", replies {' '.join(f'[{r}]' for r in it['replies'])}" if it.get("replies") else "")
+            for it in data["items"])
         messages = [
             {"role": "system", "content": ANSWER_PROMPT + f"\nToday is {datetime.now(timezone.utc):%A %Y-%m-%d}."},
             {"role": "user", "content": f"Evidence:\n\n{format_evidence(data['evidence'])}\n\n"

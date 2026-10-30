@@ -112,8 +112,8 @@ def eval_blockers(conn, agent, key_path, llm, offline) -> dict:
     clf = next(iter(res.values()))
     key = json.loads(Path(key_path).read_text(encoding="utf-8"))
     gold = {e for e, label in key["message_labels"].items() if label in ("blocker", "help_request")}
-    found = {e["event_id"] for e in agent.blockers.collect_for(["blocker", "help_request"], 60, limit=200)["evidence"]
-             if e["source"] == "discord"}
+    data = agent.blockers.collect_for(["blocker", "help_request"], 60, limit=200)
+    found = {data["evidence"][it["n"] - 1]["event_id"] for it in data["items"]}   # the flagged messages, not replies
     tp = len(gold & found)
     return {"metrics": {"classifier_macro_f1": clf["macro_f1"], "classifier_accuracy": clf["accuracy"],
                         "detection_recall": round(tp / len(gold), 3) if gold else None,
@@ -124,9 +124,14 @@ def eval_blockers(conn, agent, key_path, llm, offline) -> dict:
 def eval_linking(conn, index, key_path, llm, offline) -> dict:
     res, _ = linking_eval.run(conn, index, None if offline else llm, key_path)
     best_name, best = max(res.items(), key=lambda kv: kv[1].get("accuracy") or 0)
+    if "+ LLM" in res:   # the AI method's mistakes carry the candidates and the AI's raw answer
+        best_name, best = ("+ LLM", res["+ LLM"]) if res["+ LLM"]["accuracy"] >= best["accuracy"] else (best_name, best)
+        failures = res["+ LLM"].get("errors", [])[:10]
+    else:
+        failures = best.get("errors", [])[:10]
     return {"metrics": {"accuracy": best["accuracy"], "method": best_name,
                         **{f"accuracy[{name}]": r["accuracy"] for name, r in res.items()}},
-            "failures": best.get("errors", [])[:10]}
+            "failures": failures}
 
 
 def eval_discrepancies(conn, index, key_path, llm, offline) -> dict:
