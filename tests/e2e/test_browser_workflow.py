@@ -95,9 +95,29 @@ def screenshots_on_failure(request, tmp_path_factory):
         print(f"Screenshots in {out}")
 
 
+def settle(page):
+    """Wait until Streamlit has finished rerunning the page (its "Running…" indicator is gone)."""
+    page.wait_for_timeout(300)
+    page.get_by_test_id("stStatusWidget").wait_for(state="hidden")
+
+
 def go(page, name):
     page.get_by_role("link", name=name).click()
-    page.wait_for_load_state("networkidle")
+    settle(page)
+
+
+def choose(page, label, option):
+    """Pick an option in a selectbox by typing it, which doesn't depend on the dropdown's animation."""
+    settle(page)
+    box = page.get_by_test_id("stSelectbox").filter(has=page.get_by_text(label, exact=True)).first
+    box.click()
+    page.keyboard.type(option)
+    page.keyboard.press("Enter")
+    for _ in range(50):   # the chosen value is shown in the box's input
+        if option in (box.locator("input").input_value() or box.inner_text()):
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError(f"{label}: couldn't choose {option}")
 
 
 def test_assignment_workflow_end_to_end(server, browser, request):
@@ -113,6 +133,7 @@ def test_assignment_workflow_end_to_end(server, browser, request):
     form.get_by_test_id("stMultiSelect").first.click()   # "Assign to"
     lead.get_by_role("option", name="Kabir").click()
     lead.keyboard.press("Escape")
+    settle(lead)
     form.get_by_role("button", name="Create task").click()
     lead.get_by_text("Task created.").wait_for()
     tid = conn.execute("SELECT id FROM pm_tasks WHERE title = ?", (TITLE,)).fetchone()[0]
@@ -124,18 +145,19 @@ def test_assignment_workflow_end_to_end(server, browser, request):
     go(member, "My work")
     member.get_by_text(f"Neha assigned you “{TITLE}”").wait_for()
     member.get_by_role("tab", name="All tasks").click()
+    settle(member)
     member.get_by_role("button", name=f"Open #{tid}").first.click()
 
     # 3. Kabir reports progress with evidence and starts the task.
     member.get_by_text("Update your progress").wait_for()
-    member.get_by_label("Status").click()
-    member.get_by_role("option", name="In progress").click()
+    choose(member, "Status", "In progress")
     slider = member.get_by_role("slider").first
     slider.focus()
     for _ in range(6):   # 0 → 30 in steps of 5
         member.keyboard.press("ArrowRight")
     member.get_by_label("What did you do?").fill("Outline and endpoints table written")
     member.get_by_label("Evidence link").fill("https://github.com/campuseats/app/pull/40")
+    settle(member)
     member.get_by_role("button", name="Save update").click()
     member.get_by_text("Saved.").wait_for()
     row = conn.execute("SELECT status, reported_progress FROM pm_tasks WHERE id = ?", (tid,)).fetchone()
@@ -144,6 +166,7 @@ def test_assignment_workflow_end_to_end(server, browser, request):
     # 4. The leader sees the update, the evidence and the history.
     go(lead, "Team dashboard")
     go(lead, "Project board")
+    settle(lead)
     lead.get_by_role("button", name=f"Open #{tid}").first.click()
     lead.get_by_text("Self-reported: 30%").wait_for()
     lead.get_by_text("Progress updates (1)").click()
@@ -154,6 +177,7 @@ def test_assignment_workflow_end_to_end(server, browser, request):
     # 5. Kabir can read and comment on Riya's task but has no way to change it.
     riya_task = conn.execute("SELECT id FROM pm_tasks WHERE title = 'Order history screen'").fetchone()[0]
     go(member, "Project board")
+    settle(member)
     member.get_by_role("button", name=f"Open #{riya_task}").first.click()
     member.get_by_text("isn't assigned to you").wait_for()
     assert member.get_by_role("button", name="Save update").count() == 0
