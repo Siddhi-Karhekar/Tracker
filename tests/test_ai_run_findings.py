@@ -100,3 +100,17 @@ def test_an_evaluation_that_lost_the_ai_is_marked_invalid(tmp_path):
     assert result["ai_failures"] and not result["passed"]
     md = agents.to_markdown(result)
     assert "Not a valid AI result" in md and "✅" not in md.split("<details>")[0]
+
+
+def test_the_evaluation_stops_once_no_ai_provider_is_left(tmp_path):
+    from teampulse.eval import agents
+
+    class OutOfQuota(LLM):
+        def __init__(self):
+            super().__init__(None, providers=["groq"])
+            self._dead["groq"] = "daily quota used up"
+
+    result = agents.run(offline=False, folder=tmp_path, only=["router", "retrieval", "memory"],
+                        embedder=HashEmbedder(), llm=OutOfQuota())
+    assert list(result["results"]) == ["router"]                   # stopped after the first step
+    assert result["ai_failures"]["retrieval"] == "not run" and not result["passed"]

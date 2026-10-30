@@ -34,7 +34,7 @@ from teampulse.eval import blockers as blocker_eval
 from teampulse.eval import discrepancies as discrepancy_eval
 from teampulse.eval import linking as linking_eval
 from teampulse.eval import qa
-from teampulse.llm import LLMReply
+from teampulse.llm import PROVIDERS, LLMReply
 
 DATA = Path(__file__).resolve().parents[2] / "eval_data"
 CASES = json.loads((DATA / "agent_cases.json").read_text(encoding="utf-8"))
@@ -359,6 +359,14 @@ def run(offline: bool, folder: Path, only: list[str] | None = None, embedder=Non
             results[name]["ai_unavailable_calls"] = failed
         flag = f"   ⚠ {failed} AI call(s) failed" if failed and not offline else ""
         print(f"  {name:14} {json.dumps(results[name]['metrics'], ensure_ascii=False)}{flag}")
+        working = [p for p in getattr(llm, "providers", []) if p in PROVIDERS and p not in getattr(llm, "_dead", {})
+                   and llm._client(p)]
+        if not offline and failed and not working:   # every provider is out (e.g. daily quota): stop here
+            skipped = [a for a in AGENTS if a in wanted and a not in results]
+            if skipped:
+                print(f"  No AI provider is left, so these weren't run: {', '.join(skipped)}")
+                ai_failures.update({a: "not run" for a in skipped})
+            break
     mode = "offline" if offline else "online"
     gates = check_thresholds(results, mode)
     return {"mode": mode, "embedder": getattr(index.embedder, "name", type(index.embedder).__name__),
