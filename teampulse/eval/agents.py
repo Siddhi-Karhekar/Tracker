@@ -342,21 +342,28 @@ def run(offline: bool, folder: Path, only: list[str] | None = None, embedder=Non
         "verifier": lambda: eval_verifier(conn, llm, offline),
         "guardrails": lambda: eval_guardrails(conn, index),
     }
+    ai_failures = {}
     for name in AGENTS:
         if name not in wanted:
             continue
         started = time.time()
+        failed_before = getattr(llm, "stats", {}).get("unanswered", 0)
         if name == "end_to_end":
             results[name], ragas_rows = eval_end_to_end(agent, questions, llm, offline)
         else:
             results[name] = steps[name]()
         results[name]["seconds"] = round(time.time() - started, 1)
-        print(f"  {name:14} {json.dumps(results[name]['metrics'], ensure_ascii=False)}")
+        failed = getattr(llm, "stats", {}).get("unanswered", 0) - failed_before
+        if failed and not offline:   # this step partly ran on the fallback rules, so it doesn't measure the AI
+            ai_failures[name] = failed
+            results[name]["ai_unavailable_calls"] = failed
+        flag = f"   ⚠ {failed} AI call(s) failed" if failed and not offline else ""
+        print(f"  {name:14} {json.dumps(results[name]['metrics'], ensure_ascii=False)}{flag}")
     mode = "offline" if offline else "online"
     gates = check_thresholds(results, mode)
     return {"mode": mode, "embedder": getattr(index.embedder, "name", type(index.embedder).__name__),
-            "results": results, "thresholds": gates, "passed": all(g["ok"] for g in gates if
-                                                                    g["metric"].split(".")[0] in results),
+            "results": results, "thresholds": gates, "ai_failures": ai_failures,
+            "passed": not ai_failures and all(g["ok"] for g in gates if g["metric"].split(".")[0] in results),
             "ragas_rows": ragas_rows}
 
 
@@ -368,13 +375,20 @@ def to_markdown(run_result: dict) -> str:
             return "–"
         return f"{v:.0%}" if isinstance(v, float) and any(k in metric for k in rates) else str(v)
     lines = [f"## Agent evaluation ({run_result['mode']})", "",
-             f"Embedding model: {run_result['embedder']}. Demo team, answer key in eval_data/.", "",
+             f"Embedding model: {run_result['embedder']}. Demo team, answer key in eval_data/.", ""]
+    if run_result.get("ai_failures"):
+        lines += [f"> ⚠️ **Not a valid AI result.** AI calls failed in: "
+                  + ", ".join(f"{k} ({v})" for k, v in run_result["ai_failures"].items())
+                  + ". Those steps fell back to the rules (usually a used-up free quota). Rerun them later, "
+                  "e.g. `--only " + ",".join(run_result["ai_failures"]) + "`.", ""]
+    lines += [
              "| Agent | Metric | Value | Threshold | |", "|---|---|---|---|---|"]
     for g in run_result["thresholds"]:
         agent, metric = g["metric"].split(".", 1)
         if agent in run_result["results"]:
+            mark = "⚠️" if agent in run_result.get("ai_failures", {}) else ("✅" if g["ok"] else "❌")
             lines.append(f"| {agent} | {metric} | {fmt(g['value'], metric)} | {g['direction']} {fmt(g['threshold'], metric)} | "
-                         f"{'✅' if g['ok'] else '❌'} |")
+                         f"{mark} |")
     lines += ["", "<details><summary>All metrics and failures</summary>", ""]
     for name, r in run_result["results"].items():
         lines.append(f"**{name}** ({r['seconds']} s): " + ", ".join(f"{k} {fmt(v, k)}" for k, v in r["metrics"].items()))

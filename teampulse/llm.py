@@ -86,6 +86,10 @@ def hint(name: str, model: str, status: int | None) -> str:
                    f"(or run: ollama pull {model})" if name == "ollama" else "(see ai.google.dev/gemini-api/docs/models)"))
     if status in (401, 403):
         return f"the key was refused. Check {PROVIDERS[name][1]} in .env"
+    if status == 429:
+        return ("the daily free quota for this model is used up (it resets within 24 hours). Meanwhile: add "
+                "another provider (GEMINI_API_KEY), or switch to a model with its own quota "
+                + ("(GROQ_MODEL=openai/gpt-oss-20b)" if name == "groq" else f"({env_model})"))
     return "see the error above"
 
 
@@ -106,7 +110,9 @@ class LLM:
         # Upper bound on each reply, so a single request (or a prompt-injected one) can't run up a long, slow,
         # quota-eating answer. Answers here are short; JSON batches are the largest.
         self.max_tokens = config.get_int("TEAMPULSE_LLM_MAX_TOKENS", 1500)
-        self.stats = {"calls": 0, "cached": 0, "failed": 0, "prompt_tokens": 0, "completion_tokens": 0, "seconds": 0.0}
+        # failed: provider attempts that errored; unanswered: requests no provider could answer at all
+        self.stats = {"calls": 0, "cached": 0, "failed": 0, "unanswered": 0, "prompt_tokens": 0,
+                      "completion_tokens": 0, "seconds": 0.0}
         self._dead: dict[str, str] = {}   # providers that can't work (bad key, unknown model): skipped from then on
 
     def reset_stats(self) -> dict:
@@ -191,7 +197,8 @@ class LLM:
             except Exception as exc:  # rate limit, network, bad model name... try the next provider
                 self.stats["failed"] += 1
                 status = getattr(exc, "status_code", None)
-                if status in (401, 403, 404):   # won't fix itself: stop trying this provider in this run
+                daily = status == 429 and re.search(r"per day|\bTPD\b|\bRPD\b|daily", str(exc), re.I)
+                if status in (401, 403, 404) or daily:   # won't fix itself soon: stop trying it in this run
                     self._dead[name] = f"{type(exc).__name__} {status}: {hint(name, model, status)}"
                     log.warning("%s disabled for this run: %s", name, self._dead[name])
                 else:
@@ -204,6 +211,7 @@ class LLM:
                         "INSERT OR REPLACE INTO llm_cache (key, response, provider, created_at) VALUES (?, ?, ?, ?)",
                         (key, text, name, utc_now()))
             return LLMReply(text, name)
+        self.stats["unanswered"] += 1
         raise LLMError("No LLM provider worked. " + " | ".join(errors))
 
     def check(self) -> list[dict]:

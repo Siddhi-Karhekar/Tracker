@@ -64,3 +64,39 @@ def test_retrieval_brings_in_replies_to_a_found_message(team):
     ids = [e["event_id"] for e in result["evidence"]]
     assert "discord:900004" in ids and "discord:900015" in ids
     assert ids.index("discord:900015") == ids.index("discord:900004") + 1      # right after the message it answers
+
+
+def test_a_used_up_daily_quota_is_reported_once_and_skipped():
+    """Real run: Groq's 200k tokens/day ran out mid-evaluation and every later call retried it."""
+    from types import SimpleNamespace
+
+    class Quota(Exception):
+        status_code = 429
+
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        raise Quota("Rate limit reached for model `openai/gpt-oss-120b` ... on tokens per day (TPD): Limit 200000")
+
+    llm = LLM(providers=["groq"])
+    llm._clients = {"groq": (SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+                             "openai/gpt-oss-120b")}
+    for _ in range(3):
+        with pytest.raises(Exception):
+            llm.chat([{"role": "user", "content": "hi"}])
+    assert len(calls) == 1 and "daily free quota" in llm._dead["groq"] and "gpt-oss-20b" in llm._dead["groq"]
+    assert llm.stats["unanswered"] == 3
+
+
+def test_an_evaluation_that_lost_the_ai_is_marked_invalid(tmp_path):
+    from teampulse.eval import agents
+
+    class Flaky(LLM):   # answers nothing: like a quota that ran out
+        def __init__(self):
+            super().__init__(None, providers=["none"])
+
+    result = agents.run(offline=False, folder=tmp_path, only=["router", "memory"], embedder=HashEmbedder(), llm=Flaky())
+    assert result["ai_failures"] and not result["passed"]
+    md = agents.to_markdown(result)
+    assert "Not a valid AI result" in md and "✅" not in md.split("<details>")[0]
