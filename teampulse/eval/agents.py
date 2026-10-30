@@ -377,7 +377,7 @@ def to_markdown(run_result: dict) -> str:
     lines = [f"## Agent evaluation ({run_result['mode']})", "",
              f"Embedding model: {run_result['embedder']}. Demo team, answer key in eval_data/.", ""]
     if run_result.get("ai_failures"):
-        lines += [f"> ⚠️ **Not a valid AI result.** AI calls failed in: "
+        lines += ["> ⚠️ **Not a valid AI result.** AI calls failed in: "
                   + ", ".join(f"{k} ({v})" for k, v in run_result["ai_failures"].items())
                   + ". Those steps fell back to the rules (usually a used-up free quota). Rerun them later, "
                   "e.g. `--only " + ",".join(run_result["ai_failures"]) + "`.", ""]
