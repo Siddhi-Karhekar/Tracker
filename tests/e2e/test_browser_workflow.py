@@ -96,9 +96,17 @@ def screenshots_on_failure(request, tmp_path_factory):
 
 
 def settle(page):
-    """Wait until Streamlit has finished rerunning the page (its "Running…" indicator is gone)."""
-    page.wait_for_timeout(300)
-    page.get_by_test_id("stStatusWidget").wait_for(state="hidden")
+    """Wait until Streamlit has finished rerunning the page. A rerun can start a moment after a click, so the
+    "Running…" indicator must stay hidden for a short while, not just once."""
+    quiet = 0
+    for _ in range(600):
+        if page.get_by_test_id("stStatusWidget").is_visible():
+            quiet = 0
+        else:
+            quiet += 1
+            if quiet >= 8:      # ~0.8 s without a rerun
+                return
+        page.wait_for_timeout(100)
 
 
 def go(page, name):
@@ -107,17 +115,35 @@ def go(page, name):
 
 
 def choose(page, label, option):
-    """Pick an option in a selectbox by typing it, which doesn't depend on the dropdown's animation."""
-    settle(page)
-    box = page.get_by_test_id("stSelectbox").filter(has=page.get_by_text(label, exact=True)).first
-    box.click()
-    page.keyboard.type(option)
-    page.keyboard.press("Enter")
-    for _ in range(50):   # the chosen value is shown in the box's input
-        if option in (box.locator("input").input_value() or box.inner_text()):
-            return
-        page.wait_for_timeout(100)
+    """Pick an option in a selectbox by typing it; retried, because a late rerun can swallow the first try."""
+    for _ in range(3):
+        settle(page)
+        box = page.get_by_test_id("stSelectbox").filter(has=page.get_by_text(label, exact=True)).first
+        box.click()
+        page.keyboard.type(option)
+        page.keyboard.press("Enter")
+        for _ in range(30):   # the chosen value is shown in the box's input
+            if option in (box.locator("input").first.input_value() or box.inner_text()):
+                settle(page)
+                return
+            page.wait_for_timeout(100)
+        page.keyboard.press("Escape")
     raise AssertionError(f"{label}: couldn't choose {option}")
+
+
+def add_to_multiselect(page, box, option):
+    """Add one option to a multiselect by typing it; retried like choose()."""
+    for _ in range(3):
+        settle(page)
+        box.click()
+        page.keyboard.type(option)
+        page.keyboard.press("Enter")
+        page.keyboard.press("Escape")
+        for _ in range(30):
+            if option in box.inner_text():   # the chosen option appears as a chip
+                return
+            page.wait_for_timeout(100)
+    raise AssertionError(f"couldn't add {option}")
 
 
 def test_assignment_workflow_end_to_end(server, browser, request):
@@ -130,9 +156,7 @@ def test_assignment_workflow_end_to_end(server, browser, request):
     lead.get_by_text("New task", exact=True).click()
     form = lead.get_by_test_id("stForm").filter(has=lead.get_by_role("button", name="Create task"))
     form.get_by_label("Title").fill(TITLE)
-    form.get_by_test_id("stMultiSelect").first.click()   # "Assign to"
-    lead.get_by_role("option", name="Kabir").click()
-    lead.keyboard.press("Escape")
+    add_to_multiselect(lead, form.get_by_test_id("stMultiSelect").first, "Kabir")   # "Assign to"
     settle(lead)
     form.get_by_role("button", name="Create task").click()
     lead.get_by_text("Task created.").wait_for()

@@ -78,9 +78,9 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.lock
-      - run: pip install -r requirements.lock pytest playwright==1.63.0
+      - run: pip install -r requirements.lock pytest playwright==1.63.0 pytest-github-actions-annotate-failures
       - run: python -m playwright install --with-deps chromium
-      - run: python -m pytest -q tests/e2e
+      - run: python -m pytest -q tests/e2e --tb=short   # failures show as annotations on the run
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
