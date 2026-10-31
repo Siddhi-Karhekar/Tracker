@@ -30,6 +30,13 @@ def run_once(conn, scan_chat: bool = False, state: dict | None = None) -> None:
             log.info("Sent %d deadline reminder(s)", sent)
     except Exception as exc:
         log.error("Deadline reminders failed: %s", exc)
+    try:
+        from teampulse import pm_monitor
+        checked = pm_monitor.run_checks(conn)   # suggestions only; never changes a task
+        if checked["new"] or checked["resolved"]:
+            log.info("Daily check: %d new, %d resolved, %d open", checked["new"], checked["resolved"], checked["open"])
+    except Exception as exc:
+        log.error("Daily check failed: %s", exc)
     for name, poller in (("GitHub", github_poller), ("Notion", notion_poller)):
         try:
             poller.poll_all(conn)

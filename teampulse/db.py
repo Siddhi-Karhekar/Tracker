@@ -372,6 +372,28 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 
+-- Phase 5: what the daily check noticed. Suggestions only: nothing here ever changes a task. One row per situation
+-- (key), reopened if it comes back after being resolved; dismissed rows stay quiet until the situation ends.
+CREATE TABLE IF NOT EXISTS pm_alerts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    key            TEXT NOT NULL UNIQUE,
+    kind           TEXT NOT NULL,
+    project_id     INTEGER REFERENCES pm_projects(id) ON DELETE CASCADE,
+    task_id        INTEGER REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    member         TEXT,
+    severity       TEXT NOT NULL CHECK (severity IN ('high', 'medium', 'low')),
+    text           TEXT NOT NULL,          -- the facts
+    suggestion     TEXT NOT NULL,          -- what a person might do about it
+    status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'dismissed', 'resolved')),
+    first_seen     TEXT NOT NULL,
+    last_seen      TEXT NOT NULL,
+    resolved_at    TEXT,
+    snoozed_until  TEXT,
+    decided_by     TEXT,
+    note           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pm_alerts_status ON pm_alerts(status, project_id);
+
 -- Phase 4: what the AI proposed, kept until a person accepts or discards it. Nothing in here is a task until a
 -- leader confirms it; then the created task ids are recorded.
 CREATE TABLE IF NOT EXISTS pm_ai_drafts (

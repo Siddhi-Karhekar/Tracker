@@ -159,6 +159,36 @@ Evidence is not verification: commits don't raise verified progress; only the le
   are listed under the summary, and nothing is sent anywhere.
 - AI use is limited to 20 requests per person per hour.
 
+**Proactive monitoring (phase 5).** A daily check (`teampulse/pm_monitor.py`) notices trouble early and suggests
+what a person might do. It never changes a task. Each check-in states the facts and a suggestion, with no AI and
+no judgement of people. It looks for:
+
+- **Pace:** at the recent rate of self-reported progress, the task finishes after its deadline ("30% → 80% in 9
+  days, needs about 4 more days, due in 2").
+- **Behind:** due within 3 days and under half done.
+- **Overdue.**
+- **Order:** a task waits for one that's due later.
+- **Blocked:** blocked 3+ days with no update.
+- **No update:** in progress, and nothing changed in 7+ days in TeamPulse or the linked GitHub, Notion or chat.
+- **Review waiting:** finished work waiting 2+ days for the leader.
+- **Request waiting:** a deadline request waiting 2+ days for an answer.
+- **Workload:** a lot due in the next 7 days, measured by size and count. It's about workload, never performance.
+- **Milestone:** due within 7 days and under half complete.
+- **Unassigned:** due within 14 days with nobody assigned.
+- **GitHub/Notion:** planned tasks that disagree with GitHub or Notion.
+
+How it runs:
+
+- The poll loop runs the check on every pass, and the Team dashboard runs it when it opens.
+- Each situation is one check-in. It's updated while it lasts, resolved when it ends, and reopens if it returns.
+- New check-ins send the leaders one note a day. For "Blocked" and "No update", the people on the task get one
+  gentle nudge.
+- The leader can **Open** the task, **Remind** the people on it (a friendly note), **Snooze 3 days** or
+  **Dismiss** it. Dismissed check-ins stay quiet until the situation ends.
+- Members see the check-ins about their own work on My work, worded for them ("say so early: ask for a new
+  deadline"). They're never shown another person's workload or advice meant for the leader.
+- Through MCP, a leader's `project_status` and everyone's `my_tasks` include the check-ins.
+
 **My work (each member's personal section).** Every member has their own page. It shows:
 
 - counts: open, in progress, overdue, due in 7 days, blocked, completed (and completed this week)
@@ -218,6 +248,8 @@ Checked in `teampulse/pm.py` on every call, before anything is written. Refusals
 | Plan with AI (propose, accept, discard) | ✅ | ❌ | ❌ |
 | Connect an AI assistant (MCP) as yourself | ✅ | ✅ | ✅ |
 | Remove anyone's AI assistant connection | ✅ | own only | own only |
+| See check-ins (daily monitoring) | ✅ all | ✅ about own work | ✅ about own work |
+| Remind, snooze or dismiss a check-in | ✅ | ❌ | ❌ |
 | Draft a progress update with AI | ✅ | ✅ | ❌ |
 | Weekly summary | ✅ | ❌ | ❌ |
 | Archive a task | ✅ | ❌ | ❌ |
@@ -248,6 +280,7 @@ erDiagram
     tasks ||--o| pm_source_links : "GitHub issue / Notion page"
     pm_projects ||--o{ pm_ai_drafts : "AI proposals and summaries"
     users ||--o{ api_tokens : "AI assistant connections"
+    pm_tasks |o--o{ pm_alerts : "daily check-ins"
     pm_tasks |o--o{ pm_notifications : about
     users }o--|| members : "member_name links"
 ```
@@ -313,7 +346,7 @@ Run it with `TEAMPULSE_E2E=1 python -m pytest tests/e2e`; CI runs it on every pu
 | 2. Views and collaboration | ~~Calendar and timeline views~~, ~~deadline reminders~~, ~~evidence links~~ (done in round 2). Still to do: edit and delete your own comments, email digest of notifications, drag-and-drop board (needs a custom component) |
 | 3. Sync | ~~Link planned tasks to GitHub issues and Notion pages, show what each source says and the evidence, flag disagreements, import unplanned issues~~ (done in round 3). Still to do: webhooks for faster updates (the pollers run every 5 minutes) |
 | 4. AI project manager | ~~Planner with confirmation, do next, update drafts, weekly summary~~ (round 4), ~~TeamPulse as an MCP server~~ (round 5) |
-| 5. Proactive monitoring | Daily check for slipping tasks, overloaded people and stale blockers. It suggests; it never changes a task by itself. Weekly summary for the leader. |
+| 5. Proactive monitoring | ~~Daily check for slipping tasks, heavy weeks and stale blockers; suggestions only; weekly summary~~ (rounds 4 and 6) |
 
 ---
 
@@ -344,7 +377,8 @@ actually contains.
 | LangGraph supervisor and specialist agents | Supervisor plus five specialists (retrieval, blockers, conflicts, contributions, memory) and a Verifier | Fully implemented |
 | Only relevant agents per question | The supervisor's router picks specialists per question (keyword fallback when the AI is unavailable) | Fully implemented |
 | Task-planning agent, reporting agent, human approval with checkpoints | `pm_ai.py`: the planner and weekly summary. Drafts persist in `pm_ai_drafts` until a leader accepts or discards them, so approval can happen later or on another device. They're plain function calls, not LangGraph nodes, because each is one AI call with no branching. | Fully implemented |
-| PostgreSQL + pgvector, background jobs | SQLite (WAL) and ChromaDB; the poll loop does scheduled work. Section 1 explains why. | Not implemented (not needed at this size) |
+| PostgreSQL + pgvector, background jobs | SQLite (WAL) and ChromaDB; the poll loop does scheduled work (reminders, daily check, backups). Section 1 explains why. | Not implemented (not needed at this size) |
+| Proactive monitoring that never auto-changes tasks | `pm_monitor.py`: 12 checks, alerts with resolve/reopen/dismiss/snooze, leader digest and member nudges once a day; only a person's Remind sends anything | Fully implemented |
 | Modern frontend (React, Tailwind) | Streamlit | Not implemented (see section 1) |
 | Pagination, indexes | Pages of 15, 8 and 50; indexes on project, status, due date, assignee, notifications | Fully implemented |
 | No repeated LLM calls for deterministic work | Project management uses no AI; the agents cache AI replies | Fully implemented |
@@ -584,3 +618,66 @@ The 14 new tests check:
 - I tested with the SDK's own client; I haven't tried it in Claude Desktop itself, which isn't available here.
 - There's no remote (HTTP) mode. That would need a public server with TLS and OAuth, which a student team on
   free tools usually doesn't have.
+
+## 13. Round 6 report (phase 5: proactive monitoring)
+
+**Features completed:**
+
+- 12 data-only checks with fact-plus-suggestion wording
+- check-ins kept as one row per situation (new, updated, resolved, reopened, dismissed, snoozed)
+- one daily note for leaders, and one nudge for stale blockers and silent work
+- leader actions: open, remind, snooze, dismiss
+- a Check-ins tab on the Team dashboard
+- "Check-ins about your work" on My work, with member-facing wording
+- check-ins in the MCP tools
+- run from the poll loop
+- realistic history in the demo, so the check has something to find
+
+**Files created:** `teampulse/pm_monitor.py`, `tests/test_pm_monitor.py`.
+
+**Files modified:**
+
+- `teampulse/db.py`, `teampulse/pm_ui.py`, `teampulse/mcp_tools.py`, `teampulse/ingest/poll.py`,
+  `teampulse/seed_demo.py`
+- `views/dashboard.py`, `views/workspace.py`
+- `README.md`, this document
+
+**Database changes:** new table `pm_alerts`.
+
+**Tests executed:**
+
+- `python -m pytest -q`: **288 passed**, 1 skipped (the browser test)
+- `TEAMPULSE_E2E=1 python -m pytest tests/e2e`: **1 passed**
+- `ruff`: clean
+
+The 13 new tests check:
+
+- each check, including that on-track work produces nothing
+- that running the checks repeatedly, days apart, leaves every task and assignment exactly as it was
+- the lifecycle, and notifications once a day
+- leader-only actions
+- members see only check-ins about their own work, never advice meant for the leader
+- the wording never matches the judgemental-language guardrail on the full demo
+- both pages
+
+**Known issues:**
+
+- The thresholds (3, 7, 2 days; size 10) are fixed in code. A team might want them as settings.
+- Pace uses self-reported progress, so a task whose assignee never reports gets "No update" instead.
+
+---
+
+## Where the upgrade plan stands
+
+| Phase | Status |
+|---|---|
+| 1. Core project management | Fully implemented |
+| 2. Collaboration (Kanban, calendar, notifications, milestones, dependencies, workload) | Fully implemented; no drag-and-drop, no email |
+| 3. AI intelligence (planning, subtasks, risk detection, weekly summary, evidence-backed progress) | Fully implemented; planner quality with a real AI not yet measured |
+| 4. Architecture (MCP where justified, PostgreSQL if necessary, frontend) | MCP server implemented; PostgreSQL and React deliberately not (section 1) |
+| 5. Production readiness (security, tests, backups, docs) | Done throughout: 288 tests, browser test, CI on Linux and Windows, pip-audit, backups, SECURITY.md |
+
+**Needs external credentials:** GitHub, Notion and Discord ingestion; AI answers (Groq or Gemini key, or a local
+Ollama).
+
+**Needs paid infrastructure:** nothing.

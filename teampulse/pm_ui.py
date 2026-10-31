@@ -13,7 +13,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from teampulse import auth, pm, pm_ai, pm_sync, ui
+from teampulse import auth, pm, pm_ai, pm_monitor, pm_sync, ui
 from teampulse.auth import Actor
 
 STATUS_TONE = {"backlog": "quiet", "todo": "quiet", "in_progress": "info", "review": "info", "blocked": "bad",
@@ -614,3 +614,36 @@ def ai_planner(conn, actor: Actor, project_id: int, llm) -> None:
                 _do(lambda items=items, d=draft: pm_ai.accept_plan(conn, actor, d["id"], items), "Tasks created.")
             if c2.button("Discard", key=f"plan-no-{draft['id']}"):
                 _do(lambda d=draft: pm_ai.discard(conn, actor, d["id"]), "Proposal discarded.")
+
+
+# ---- check-ins (daily monitoring) -----------------------------------------------------------------------------
+
+def checkins(conn, actor: Actor, items: list[dict], manage: bool) -> None:
+    """Facts plus a suggestion. Leaders can open the task, remind the people on it, snooze or dismiss; nothing here
+    changes a task."""
+    if not items:
+        ui.empty("Nothing to check.", "The daily check looks for slipping pace, stale blockers, silent work, waiting "
+                 "reviews and requests, heavy weeks, milestones and unassigned work.")
+        return
+    if manage:
+        st.caption("From the daily check. Suggestions only: TeamPulse never changes a task by itself. Members see the "
+                   "check-ins about their own work.")
+    for a in items:
+        label = pm_monitor.KIND_LABEL.get(a["kind"], a["kind"])
+        suggestion = a["suggestion"] if manage else pm_monitor.member_suggestion(a)
+        st.markdown(ui.row(f"{ui.pill(label, ui.SEVERITY_TONE[a['severity']])} {ui.e(a['text'])}",
+                           ui.e(suggestion), ui.SEVERITY_TONE[a["severity"]],
+                           f"first noticed {ui.e(ui.ago(a['first_seen']))}"), unsafe_allow_html=True)
+        cols = st.columns([1, 1, 1, 1, 2])
+        if a["task_id"] and cols[0].button("Open", key=f"chk-open-{a['id']}", type="tertiary"):
+            st.session_state[OPEN_KEY] = a["task_id"]
+            st.rerun()
+        if manage:
+            if (a["task_id"] or a["member"]) and cols[1].button("Remind", key=f"chk-remind-{a['id']}", type="tertiary",
+                                                                help="Send the people on it a short, friendly note"):
+                _do(lambda a=a: pm_monitor.remind(conn, actor, a["id"]), "Reminder sent.")
+            if cols[2].button("Snooze 3 days", key=f"chk-snooze-{a['id']}", type="tertiary"):
+                _do(lambda a=a: pm_monitor.snooze(conn, actor, a["id"], 3), "Snoozed for 3 days.")
+            if cols[3].button("Dismiss", key=f"chk-dismiss-{a['id']}", type="tertiary",
+                              help="It's fine as it is. It stays quiet until the situation changes."):
+                _do(lambda a=a: pm_monitor.dismiss(conn, actor, a["id"]), "Dismissed.")

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from teampulse import auth, pm, pm_ai, pm_sync
+from teampulse import auth, pm, pm_ai, pm_monitor, pm_sync
 from teampulse.auth import Actor, PermissionDenied, audit, iso, now
 
 CALLS_PER_10_MIN = 120
@@ -66,6 +66,8 @@ def my_tasks(conn, actor: Actor, member: str | None = None) -> dict:
     w = pm.workspace(conn, name)
     sections = {k: [_short(t) for t in v] for k, v in w["sections"].items() if k not in ("recent", "subtasks") and v}
     return {"member": name, "summary": w["metrics"], "tasks": sections,
+            "check_ins": [{"about": a["text"], "suggestion": a["suggestion"] if pm.can_manage(actor)
+                           else pm_monitor.member_suggestion(a)} for a in pm_monitor.alerts(conn, member=name)],
             "deadline_requests": [{"task_id": r["task_id"], "task": r["title"], "proposed": r["proposed"],
                                    "status": r["status"]} for r in w["requests"]]}
 
@@ -134,7 +136,9 @@ def project_status(conn, actor: Actor, project_id: int | None = None) -> dict:
         out.update(at_risk=[_short(t) for t in d["at_risk"]], waiting_for_review=[_short(t) for t in d["review"]],
                    deadline_requests=[{"task_id": r["task_id"], "task": r["title"], "by": r["requested_by"],
                                        "proposed": r["proposed"], "reason": r["reason"]} for r in d["requests"]],
-                   workload_alphabetical=d["workload"])
+                   workload_alphabetical=d["workload"],
+                   check_ins=[{"severity": a["severity"], "about": a["text"], "suggestion": a["suggestion"],
+                               "task_id": a["task_id"]} for a in pm_monitor.alerts(conn, project_id)])
     return out
 
 

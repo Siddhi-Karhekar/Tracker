@@ -360,6 +360,20 @@ def seed_projects(conn) -> None:
                          "VALUES (?, ?, ?, 'Neha', ?)", [(tid, sid, title, ago(1)) for tid, (sid, title) in links.items()])
     del report
 
+    # Phase 5: real teams have history, so the daily check has something to notice. Kabir has been blocked for four
+    # days, Riya's work has waited three days for review, his deadline request three days for an answer, and payment
+    # has crept from 30% to 80% over nine days while it's due in two.
+    with conn:
+        for table, col in (("pm_history", "at"), ("pm_comments", "created_at"), ("pm_progress_updates", "created_at")):
+            conn.execute(f"UPDATE {table} SET {col} = ? WHERE task_id = ?", (ago(4), recs))
+            conn.execute(f"UPDATE {table} SET {col} = ? WHERE task_id = ?", (ago(3), history))
+        conn.execute("UPDATE pm_requests SET created_at = ? WHERE task_id = ?", (ago(3), recs))
+        conn.execute("UPDATE pm_progress_updates SET created_at = ? WHERE task_id = ? AND kind = 'reported'",
+                     (ago(1), payment))
+        conn.execute("INSERT INTO pm_progress_updates (task_id, kind, author_id, author, progress, note, created_at) "
+                     "VALUES (?, 'reported', 'seed-kabir', 'Kabir', 30, 'Started the checkout page.', ?)",
+                     (payment, ago(10)))
+
     # Phase 4: a proposal from yesterday's meeting notes, waiting for Neha to confirm (made by the rules, so the
     # demo needs no AI key). Nothing in it is a task until she ticks items and presses Create.
     from teampulse import pm_ai

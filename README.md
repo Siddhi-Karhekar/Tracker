@@ -69,6 +69,9 @@ in Hinglish. The three drift apart, and nobody has time to cross-check them. Tea
   - "Draft my update" writes a progress note from linked commits for the member to edit.
   - A weekly summary for the leader cites a task for every statement.
   - Without an AI key, rules do all of this more simply.
+- **Daily check-ins**: TeamPulse notices slipping pace ("30% → 80% in 9 days, due in 2"), blockers with no update,
+  silent work, reviews and requests left waiting, heavy weeks, and milestones at risk. It suggests what to do and
+  never changes a task by itself. Members see the check-ins about their own work.
   Design, permission matrix and roadmap: [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
 
 **Also included**
@@ -439,7 +442,7 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **275 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **288 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
 regression test for every bug found by real AI runs, and project management (permissions per role and per
 assignee, workflow rules, two people editing at once, both roles through the pages). A Playwright test runs the
@@ -637,6 +640,7 @@ teampulse/
   pm_sync.py                planned tasks ↔ GitHub issues / Notion pages: evidence, disagreements, import
   pm_ai.py                  AI planner (propose → confirm), do next, progress-update drafts, weekly summary
   mcp_server.py, mcp_tools.py  TeamPulse as an MCP server for Claude Desktop; personal tokens in auth.py
+  pm_monitor.py             daily check-ins: 12 checks, suggestions only
   ui.py, webapp.py          design system, shared page helpers, public demo mode
   health.py                 connection checks and process status
   maintenance.py            retention purge, verified backup and restore
@@ -647,7 +651,7 @@ teampulse/
 eval_data/                  18 golden questions (with reference answers), 60 Hinglish messages,
                             agent cases, thresholds
 docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
-tests/                      275 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
+tests/                      288 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment

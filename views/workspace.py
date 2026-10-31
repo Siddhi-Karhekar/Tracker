@@ -1,7 +1,7 @@
 """My work: each person's own workspace. Leaders can open anyone's; members see only their own."""
 import streamlit as st
 
-from teampulse import pm, pm_ai, pm_ui, ui
+from teampulse import pm, pm_ai, pm_monitor, pm_ui, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("workspace")
@@ -61,6 +61,12 @@ pm_ui.open_task_panel(conn, actor)
 s = w["sections"]
 focus, everything, month, requests = st.tabs(["Focus", "All tasks", "Calendar", "Requests"])
 with focus:
+    about_me = pm_monitor.alerts(conn, member=member)
+    if about_me:
+        st.subheader("Check-ins about " + ("your" if own else f"{member}'s") + " work")
+        st.caption("What the daily check noticed. Your team leader sees the same. A short update on the task usually "
+                   "clears it.")
+        pm_ui.checkins(conn, actor, about_me, manage=False)
     steps = pm_ai.next_steps(conn, member)
     if steps:
         st.subheader("Do next")

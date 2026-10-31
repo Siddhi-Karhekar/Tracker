@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import pm, pm_ai, pm_sync, pm_ui, ui
+from teampulse import pm, pm_ai, pm_monitor, pm_sync, pm_ui, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("dashboard")
@@ -28,8 +28,11 @@ for col, (label, value) in zip(cols, [("Tasks", d["total"]), ("Completed", f"{d[
 pm_ui.open_task_panel(conn, actor)
 
 sync = pm_sync.overview(conn, project_id or None)
-decide, risk, sources, weekly, people, plan = st.tabs([
-    f"Needs your decision ({len(d['review']) + len(d['requests'])})", f"At risk ({len(d['at_risk'])})",
+pm_monitor.run_checks(conn)   # cheap and idempotent; the poll loop runs it too
+checkins = pm_monitor.alerts(conn, project_id or None)
+decide, check, risk, sources, weekly, people, plan = st.tabs([
+    f"Needs your decision ({len(d['review']) + len(d['requests'])})", f"Check-ins ({len(checkins)})",
+    f"At risk ({len(d['at_risk'])})",
     f"GitHub & Notion ({len(sync['disagree'])})", "Weekly summary", "Workload", "Milestones & activity"])
 with decide:
     if not (d["review"] or d["requests"]):
@@ -45,6 +48,8 @@ with decide:
                                f"from {ui.e(r['due_date'] or 'no deadline')} to {ui.e(r['proposed'])}"),
                         unsafe_allow_html=True)
             pm_ui.request_buttons(conn, actor, r, "dash")
+with check:
+    pm_ui.checkins(conn, actor, checkins, manage=True)
 with risk:
     if not d["at_risk"]:
         ui.empty("Nothing looks at risk.", "Overdue, blocked, nearly-due and unassigned tasks appear here.")
