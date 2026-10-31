@@ -7,6 +7,10 @@ from teampulse.webapp import get_agent, require_page
 
 actor = require_page("dashboard")
 conn = get_agent().conn
+if not conn.execute("SELECT 1 FROM sync_state WHERE key = 'tasks:refreshed_at'").fetchone():
+    from teampulse import actions   # first open of a new database: read GitHub/Notion tasks once (Home does too)
+    with st.spinner("Reading GitHub and Notion tasks for the first time…"):
+        actions.first_build(conn, get_agent().index, get_agent().llm)
 ui.header("Team dashboard", "Where the project stands, what needs your decision, and what might slip.")
 pm_ui.flash()
 

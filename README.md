@@ -2,14 +2,21 @@
 
 [![CI](https://github.com/Siddhi-Karhekar/Tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Siddhi-Karhekar/Tracker/actions/workflows/ci.yml)
 
-**A multi-agent AI assistant and project manager for student project teams.** Teams plan and run their work in
-TeamPulse (projects, tasks, a personal workspace for every member, a dashboard for the leader). TeamPulse also reads a team's **GitHub**, **Notion** and
-**Discord**. It shows where they disagree, pulls blockers out of Hinglish chat, and builds fair,
-evidence-based contribution reports. Every answer cites its sources. Everything runs on free tools and free AI
-tiers.
+**An agentic AI project manager for student teams.** TeamPulse does two jobs:
+
+1. **Runs the team's work.** Projects, tasks, a personal workspace for every member, a dashboard for the leader,
+   an AI planner that only proposes, and daily check-ins that notice trouble early.
+2. **Watches GitHub, Notion and Discord.** It shows where they disagree with each other and with the plan,
+   pulls blockers out of Hinglish chat, and builds fair, evidence-based contribution reports.
+
+Every AI answer cites its sources, and no AI changes the team's data on its own. Everything runs on free tools
+and free AI tiers.
 
 > *"Login is marked Done in Notion, but GitHub issue #12 is still open and Riya said in chat yesterday that the
-> OTP still isn't arriving."* That is the kind of thing TeamPulse puts at the top of the Home page.
+> OTP still isn't arriving."* That's the kind of thing TeamPulse puts at the top of the Home page.
+>
+> *"Payment went from 30% to 80% in 9 days. At that pace it needs about 4 more days, but it's due in 2."*
+> That's a daily check-in on the Team dashboard.
 
 ---
 
@@ -37,52 +44,43 @@ tiers.
 ## 1. What it does
 
 Student teams keep their plan in Notion, their code in GitHub and their real conversations in Discord, usually
-in Hinglish. The three drift apart, and nobody has time to cross-check them. TeamPulse does it for them.
+in Hinglish. The three drift apart, nobody has time to cross-check them, and deadlines slip quietly. TeamPulse
+plans the work, checks it against what's really happening, and says early when something is off.
 
-**Three headline features**
+### Plan and run the work
+
+| Feature | What you get |
+|---|---|
+| **My work** (every member) | Your own section: overdue, due soon, blocked, high priority, in progress, under review, done. Also **Do next** (your top 3 tasks and why), check-ins about your work, notifications, a calendar and your deadline requests. Leaders can open anyone's. |
+| **Project board** | Projects, milestones, tasks with several assignees, subtasks, dependencies, comments and full history. Shown as a **board, list, calendar or timeline**. Workflow: Backlog → To do → In progress → Under review → Completed, plus Blocked. |
+| **Team dashboard** (leader) | Completion by task size, what needs a decision (work to approve, deadline requests), daily check-ins, at-risk work, GitHub/Notion disagreements, a weekly summary, workload per person (alphabetical, never ranked), milestones and activity. |
+| **Fair roles** | Members update **their own** tasks (status up to "Under review", progress, subtasks, blockers, deadline requests) and comment on any task. The leader plans, assigns, approves and marks work Completed. |
+| **Honest progress** | **Self-reported** progress (with an evidence link: PR, commit, doc) is kept separate from **verified** progress, which only the leader sets. Completion counts finished work by size and never averages percentages. |
+| **Linked to GitHub and Notion** | Each planned task shows its issue's commits, PRs and chat, and says where the sources disagree with the plan ("Completed here, but GitHub still says open"). The plan is the source of truth: nothing is overwritten. |
+| **AI project manager** (proposes, people decide) | Paste meeting notes (English or Hinglish) to get proposed tasks with owners, deadlines and subtasks; nothing is created until the leader ticks and confirms. Also "Draft my update" from linked commits, and a weekly summary that cites a task for every statement. |
+| **Daily check-ins** | Slipping pace, blockers with no update, silent work, reviews and requests left waiting, heavy weeks, milestones at risk. Each comes as facts plus a suggestion. It never changes a task; only the leader can send a friendly **Remind**. |
+| **Deadline reminders** | Once a day for work due today, tomorrow or overdue. |
+| **Use it from Claude Desktop** | TeamPulse is an **MCP server**: ask your AI assistant "what's on my plate?" and it answers from TeamPulse, as you, with your permissions. |
+
+### Watch the sources
 
 | Feature | What you get |
 |---|---|
 | **Conflict detection** | Where Notion, GitHub and chat disagree: status ("Done" vs open issue), owner (assigned to Kabir, Aman doing it), deadline (two different dates), stale plans ("Firebase" vs a chat decision for Postgres). Each finding cites both sides and suggests a fix. |
-| **Blockers from Hinglish chat** | "OTP abhi bhi nahi aa raha", "canteen se data nahi mila", "re-review kar de" become *blocked*, *waiting for help* or *decision*, each linked to its task, marked open or resolved, with the replies that answer it. |
-| **Fair contribution reports** | Per person: code, reviews, planning and docs, chat updates and **helping others**, with every chat claim ("80% done") checked against evidence. No rankings or scores. Opt-in, and each person approves their own report before the team sees it. |
+| **Blockers from Hinglish chat** | "OTP abhi bhi nahi aa raha", "canteen se data nahi mila" and "re-review kar de" become *blocked*, *waiting for help* or *decision*. Each is linked to its task, marked open or resolved, and shown with the replies that answer it. |
+| **Fair contribution reports** | Per person: code, reviews, planning and docs, chat updates and **helping others**. Every chat claim ("80% done") is checked against evidence. There are no rankings or scores; it's opt-in, and each person approves their own report before the team sees it. |
+| **Ask** | Questions in English or Hinglish ("kya sab sync me hai?") get cited answers, a check that each statement matches its source, and the agents' step-by-step trace. |
+| **Team memory** | "Remember that our final review is on 17 Nov." Remembered facts are re-checked against live data every time they're used. |
 
-**Project management (TeamPulse 2.0)**
+Underneath it all:
 
-- **My work**: each member's personal section shows what's overdue, due soon, blocked, high priority, in
-  progress, under review and done, plus notifications and their deadline requests.
-- **Project board**: projects, milestones, tasks with several assignees, subtasks, dependencies, comments and
-  full history, as a board, a list, a calendar or a timeline. Workflow: Backlog → To do → In progress → Under
-  review → Completed, plus Blocked. Deadline reminders arrive once a day.
-- **Team dashboard** (leader): completion, workload per person (alphabetical, never ranked), at-risk work,
-  and what needs a decision (finished work to approve, deadline requests).
-- Members update their own tasks, report blockers, ask for a new deadline and comment. The leader plans,
-  assigns, verifies progress and marks work Completed. **Self-reported progress** (with evidence links) is kept
-  separate from **verified progress**, which only the leader sets. Completion % counts finished work by size.
-- **Linked to GitHub and Notion**: each planned task shows its issue's commits, PRs and chat, and TeamPulse
-  says where GitHub or Notion disagree with the plan ("Completed here, but GitHub still says open"). The plan
-  is the source of truth; nothing changes by itself. Issues that aren't planned yet can be added in one click.
-- **AI project manager that only proposes**:
-  - Paste meeting notes (English or Hinglish) to get proposed tasks with owners, deadlines and subtasks. Nothing
-    is created until the leader ticks items and confirms.
-  - "Do next" lists each person's most urgent tasks.
-  - "Draft my update" writes a progress note from linked commits for the member to edit.
-  - A weekly summary for the leader cites a task for every statement.
-  - Without an AI key, rules do all of this more simply.
-- **Daily check-ins**: TeamPulse notices slipping pace ("30% → 80% in 9 days, due in 2"), blockers with no update,
-  silent work, reviews and requests left waiting, heavy weeks, and milestones at risk. It suggests what to do and
-  never changes a task by itself. Members see the check-ins about their own work.
-  Design, permission matrix and roadmap: [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
+- **Sign-in with two roles**, checked on the server for every action.
+- **Guardrails** on every AI answer.
+- **Evaluation**: a full suite per agent, plus RAGAS and LangSmith.
+- **Tests**: 288 automated tests, plus a real-browser test.
 
-**Also included**
-
-- **Ask**: questions in English or Hinglish ("kya sab sync me hai?") with cited answers, a check that each
-  statement matches its source, and the agent's step-by-step trace.
-- **Team memory**: "remember that our final review is on 17 Nov". Remembered facts are re-checked against
-  live data every time they're used.
-- **Accounts and roles**: a team leader (full control) and team members (update their own tasks and comment;
-  everything else read-only). Permissions are checked on the server.
-- **Guardrails** on every AI answer, plus a full **evaluation suite** (per agent, RAGAS, LangSmith).
+The design decisions, permission matrix and data model for project management are in
+[docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
 
 ---
 
@@ -91,58 +89,93 @@ in Hinglish. The three drift apart, and nobody has time to cross-check them. Tea
 ```mermaid
 flowchart LR
     subgraph Sources
-        D[Discord bot<br/>live + backfill, opt-in]
-        G[GitHub poller<br/>issues, PRs, commits, reviews]
-        N[Notion poller<br/>task DBs, plan pages]
+        D[Discord bot<br/>opt-in]
+        G[GitHub poller]
+        N[Notion poller]
     end
     D & G & N --> E[(SQLite<br/>one Event format)]
     E --> I[(ChromaDB<br/>multilingual vectors)]
     E --> P[Processing<br/>chat labels · task registry ·<br/>chat→task links · claims · conflicts]
     P --> E
+    subgraph Plan["Project management (source of truth)"]
+        PM[(Projects · tasks ·<br/>progress · history)]
+        AIP[AI planner<br/>proposes → leader confirms]
+        MON[Daily check-ins<br/>suggest only]
+    end
+    P -. evidence and disagreements .-> PM
+    AIP --> PM
+    PM --> MON
     Q[Question] --> S{Supervisor<br/>LangGraph}
-    S --> R[Retrieval]
+    S --> R[Retrieval<br/>LangGraph]
     S --> B[Blockers]
     S --> X[Conflicts]
     S --> C[Contributions]
     S --> M[Memory]
-    R & B & X & C & M --> GR[Guardrails]
-    GR --> V[Verifier]
-    V --> A[Cited answer]
+    R & B & X & C & M --> GR[Guardrails] --> V[Verifier] --> A[Cited answer]
     I -.-> R
-    E -.-> B & X & C & M
+    CD[Claude Desktop] <-->|MCP, as you| PM
 ```
 
 1. **Ingestion.** A Discord bot (only for members who opted in) and pollers for GitHub and Notion turn
-   everything into one `Event` format in SQLite, each with a link back to the original. Edits and deletes are
+   everything into one `Event` format in SQLite. Each event links back to the original. Edits and deletes are
    mirrored.
 2. **Processing**, plain code with AI only where judgement is needed:
-   - chat messages are grouped into conversations and labelled (blocker, help request, decision, progress or
-     chat);
-   - GitHub issues and Notion tasks are merged into one **task registry**;
-   - chat messages are **linked to tasks**;
-   - every source's view of each task (status, owner, deadline) becomes a **claim**;
-   - rules turn disagreeing claims into **conflicts**.
-3. **Answering.** The **Supervisor** (a LangGraph graph) rewrites follow-up questions and splits multi-part
-   ones. It sends each part to a specialist agent, combines the answers, runs the **guardrails** and the
-   **Verifier**, and attaches relevant team memory.
-4. **App.** A Streamlit web app with sign-in, role-based pages, and every answer linked to its sources.
+   - Chat is grouped into conversations and labelled.
+   - GitHub issues and Notion tasks are merged into one **task registry**.
+   - Chat messages are linked to tasks.
+   - Every source's view of each task becomes a **claim**.
+   - Rules turn disagreeing claims into **conflicts**.
+3. **Project management.** Projects and tasks live in TeamPulse and are the source of truth. GitHub, Notion and
+   chat only add evidence and point out disagreements. The AI planner and the daily check-ins propose and
+   suggest; people decide.
+4. **Answering.** The **Supervisor** (a LangGraph graph) routes each question to specialist agents and combines
+   their answers. It then runs the **guardrails** and the **Verifier**.
+5. **App.** A Streamlit web app with sign-in and role-based pages. TeamPulse is also an MCP server for AI
+   assistants.
 
-**Multi-agent, using the supervisor pattern.** One Supervisor routes questions to five specialists. The
-Retrieval agent and the Supervisor are LangGraph graphs; the other specialists are Python classes the
-Supervisor calls. It doesn't use LangChain chains or n8n.
+### Is it agentic? Which frameworks?
 
-**Tech stack (all free)**
+**Yes, it's a multi-agent system using the supervisor pattern, built on LangGraph.**
+
+- **Supervisor graph** (`agents/supervisor.py`):
+  `route → run_specialists → (single | synthesize) → verify → recall_memory`.
+  - The AI reads the question, Hinglish included, and decides which specialists to call. "Aman ne kya kiya?"
+    goes to Contributions; "kis cheez pe atke hain?" goes to Blockers. A two-part question goes to two
+    specialists.
+  - A conditional edge combines several answers into one.
+- **Retrieval graph** (`agents/retrieval.py`): `plan → retrieve → answer → check_citations`. The AI plans its own
+  search queries, and the agent follows chat reply threads.
+- **Specialists:** Blockers, Conflicts, Contributions and Memory, each with its own prompt, data and guardrails.
+  The **Verifier** checks every cited statement against its source.
+
+**LangChain is not used for the agents.** They call Groq, Gemini or Ollama directly through the `openai`
+client. That keeps provider fallback, retries, free-quota handling and caching under TeamPulse's control.
+LangChain appears only in a tracing package and in the separate RAGAS environment. **LangSmith** is used for
+evaluation experiments and optional tracing; **n8n** is not used.
+
+**Human in the loop by design.** The AI never changes the team's data by itself:
+
+- the planner proposes, and the leader confirms;
+- "Draft my update" fills a text box, and the member saves it;
+- check-ins suggest;
+- the MCP tools can't assign, change deadlines, approve, complete or delete.
+
+The project-management AI features are single AI calls followed by strict checks, so they're plain functions,
+not graphs.
+
+### Tech stack (all free)
 
 | Layer | Tools |
 |---|---|
-| Agents | LangGraph (Supervisor and Retrieval graphs), plain Python specialists |
+| Agents | LangGraph (Supervisor and Retrieval graphs), Python specialists, a Verifier and guardrails |
 | AI models | Groq (`openai/gpt-oss-120b` by default), Google Gemini, or **Ollama** (local), with automatic fallback, caching and rate-limit handling |
 | Search | ChromaDB (embedded) + FastEmbed `paraphrase-multilingual-MiniLM-L12-v2` (understands Hinglish ↔ English, ~0.2 GB, no PyTorch) |
-| Storage | SQLite (WAL mode, one connection per thread) |
-| App | Streamlit ≥ 1.50 |
+| Storage | SQLite (WAL mode, one connection per thread, migrations in code) |
+| App | Streamlit ≥ 1.50, Altair (timeline) |
+| AI assistant access | Official MCP Python SDK (`mcp` 2.x), stdio |
 | Sources | discord.py, GitHub REST API, Notion API |
-| Evaluation | pytest, RAGAS 0.4, LangSmith, Arize Phoenix (optional tracing) |
-| CI | GitHub Actions: tests on Linux (Python 3.12 and 3.13) and Windows, lint, dependency scan, RAGAS wiring |
+| Evaluation | pytest, Playwright (real browser), RAGAS 0.4, LangSmith, Arize Phoenix (optional tracing) |
+| CI | GitHub Actions: Linux (Python 3.12 and 3.13), Windows, real-browser test, lint, dependency scan, RAGAS wiring |
 
 ---
 
@@ -160,7 +193,7 @@ Set-ExecutionPolicy -Scope Process Bypass      # lets this window run the activa
 .venv\Scripts\Activate.ps1                     # the prompt now starts with (.venv)
 python -m pip install -r requirements.lock
 copy .env.example .env
-python -m teampulse.seed_demo                  # builds the demo team; prints two sign-ins
+python -m teampulse.seed_demo                  # builds the demo team; prints four sign-ins (shown once)
 streamlit run app.py
 ```
 
@@ -175,18 +208,26 @@ python -m teampulse.seed_demo
 streamlit run app.py
 ```
 
+Already have it? `git pull`, then `pip install -r requirements.lock` and `python -m teampulse.seed_demo` again.
+
 Then:
 
 1. **Add one free AI key** to `.env` (open it with `notepad .env` on Windows):
    - Groq: https://console.groq.com/keys → `GROQ_API_KEY=...`
    - or Gemini: https://aistudio.google.com/apikey → `GEMINI_API_KEY=...`
-   - or install Ollama and `ollama pull qwen2.5:7b` (local, private, no key needed).
+   - or install Ollama and run `ollama pull qwen2.5:7b` (local, private, no key needed).
 
    Without any key, TeamPulse still works using its rule-based fallbacks; the answers are just plainer.
-2. **Sign in** with the details `seed_demo` printed: **Neha** (team leader, sees everything) or **Kabir**
-   (team member, read-only).
-3. **Try:** Home → Conflicts → Blockers → Tasks → Contributions. In **Ask**, try "kya sab sync me hai?",
-   "who is really doing payments?" and "remember that our demo day is on 2 Dec".
+2. **Sign in** with the details `seed_demo` printed: **neha** (team leader) or **kabir**, **aman**, **riya**
+   (team members).
+3. **Try, as Neha:**
+   - **Team dashboard:** look at Check-ins, GitHub & Notion, and Weekly summary.
+   - **Project board:** open "Plan with AI" (a proposal is waiting for you), switch to the Calendar and
+     Timeline tabs, and open task #3.
+   - **Home → Conflicts → Blockers**.
+   - In **Ask**, try "kya sab sync me hai?" or "who is really doing payments?".
+4. **Try, as Kabir:** open **My work** (Do next, check-ins about your work) and open task #4. Then try
+   **Draft my update**, report progress with an evidence link, or ask for a new deadline.
 
 The first start downloads the search model once (~0.2 GB). Every new terminal window needs the environment
 activated again (`.venv\Scripts\Activate.ps1`). If you see `No module named 'requests_toolbelt'`, the
@@ -195,17 +236,27 @@ environment isn't active.
 ### The demo team: "CampusEats"
 
 A canteen pre-order app built by **Riya** (frontend), **Aman** (backend), **Kabir** (payments + ML) and
-**Neha** (PM). The data hides these problems on purpose; the answer key is in `data/demo_answer_key.json`:
+**Neha** (PM). The data hides these problems on purpose. The answer key for the sources is in
+`data/demo_answer_key.json`.
 
-| Planted problem | Evidence |
+| In the sources | Evidence |
 |---|---|
 | Login marked **Done** in Notion | GitHub #12 still open; Discord: "OTP abhi bhi nahi aa raha" |
 | Menu API **In progress** in Notion | PR #15 merged, #14 closed |
-| Payments assigned to Kabir | Aman's commits and Aman in chat: "payment main kar raha hu" |
+| Payments assigned to Kabir | Aman's commits, and Aman in chat: "payment main kar raha hu" |
 | Payments deadline differs | Notion due date vs GitHub milestone M2 |
 | Plan says Firebase | Discord decision: Postgres |
 | Hidden blockers | OTP mails in spam; no canteen data for the ML model (Neha replies she's on it) |
 | An unproven claim | Kabir: "recommendation model almost 80% done", with one notebook commit days earlier |
+
+| In the plan (project "CampusEats MVP") | What TeamPulse shows |
+|---|---|
+| Payment: Kabir reports 80%, Neha verified 40%; 30% → 80% over 9 days, due in 2 | "Reported 80% but the leader verified 40%" and a **Pace** check-in |
+| Food recommendations blocked for 4 days, with a deadline request waiting 3 days | **Blocked** and **Request waiting** check-ins; first in Kabir's Do next |
+| Order history waiting 3 days for review | **Review waiting** check-in; Approve / Send back on the dashboard |
+| "Share the API docs" 1 day late | **Overdue** check-in and deadline reminders |
+| Six tasks linked to their GitHub issues | Disagreements, e.g. "Completed here, but GitHub still says open" |
+| Notes from yesterday's meeting | A **Plan with AI** proposal waiting for Neha to confirm |
 
 ---
 
@@ -213,20 +264,20 @@ A canteen pre-order app built by **Riya** (frontend), **Aman** (backend), **Kabi
 
 | Page | What it shows |
 |---|---|
-| **My work** | Your personal workspace: counts, notifications, Focus (overdue, blocked, due soon, high priority), all your tasks, your deadline requests. Leaders can open anyone's |
-| **Project board** | Board and list of a project's tasks with filters; open a task to update it, tick subtasks, report a blocker, ask for a new deadline or comment. Leaders create projects, milestones and tasks here |
-| **Team dashboard** (leader) | Completion, workload, at-risk tasks, work to approve, deadline requests, milestones, activity |
+| **My work** | Your personal workspace: counts, notifications, **Do next**, check-ins about your work, Focus (overdue, blocked, due soon, high priority), all your tasks, a calendar and your deadline requests. Leaders can open anyone's |
+| **Project board** | A project's tasks as a Board, List, Calendar or Timeline, with filters. Open a task to update it, tick subtasks, report a blocker, draft an update from GitHub, ask for a new deadline, comment, or see its GitHub/Notion evidence. Leaders create projects, milestones and tasks here, and use **Plan with AI** |
+| **Team dashboard** (leader) | Needs your decision, Check-ins, At risk, GitHub & Notion (disagreements, add unplanned issues), Weekly summary, Workload, Milestones & activity |
 | **Home** | The single most important issue in plain words, a needs-attention list, recent activity, and the **sync strip**: each task with what GitHub, Notion and chat say |
 | **Ask** | Chat with cited answers, a "statements match their sources" check, guardrail notes and the agent trace |
 | **Blockers** | What people are stuck on or waiting for, linked to tasks, with open / resolved / possibly resolved |
 | **Conflicts** | Where sources disagree, both sides linked, severity, suggested fix; leaders mark real / false alarm |
-| **Source tasks** | Every GitHub issue / Notion task's status / owner / deadline per source; leaders correct chat→task links |
+| **Source tasks** | Every GitHub issue and Notion task, with the status, owner and deadline each source gives it; leaders correct chat→task links |
 | **Contributions** | Evidence-based reports; each member reviews, adds context and approves their own |
-| **Team & access** (leader) | Create accounts, one-time passwords, reset or deactivate, choose what members see, activity log |
+| **Team & access** (leader) | Create accounts, one-time passwords, reset or deactivate, choose what members see, everyone's AI assistant connections, activity log |
 | **Data sources** (leader) | Freshness, whether the poller and bot are running, connection check with exact fixes, AI test |
 | **Team memory** | Remembered facts, checked against live data |
 | **Label chat** (leader) | Label messages by hand to measure the classifier on your own data |
-| **My account** | Choose your password, sign out of other devices |
+| **My account** | Choose your password, sign out of other devices, connect an AI assistant (MCP) |
 
 ### Accounts and roles
 
@@ -345,7 +396,10 @@ How TeamPulse handles free tiers:
 
 ## 7. The agents in detail
 
-### Supervisor (`agents/supervisor.py`)
+How the agents fit together, and which frameworks are used, is in
+[section 2](#is-it-agentic-which-frameworks).
+
+### Supervisor (`agents/supervisor.py`), a LangGraph graph
 1. **Route** (AI, JSON): rewrites follow-ups into standalone questions ("and who owns it?" → "Who owns the
    payments task?"). Splits multi-part questions into up to 3 parts and picks a specialist for each. If the
    AI is unavailable, a Hinglish-aware keyword router takes over ("atke" → blockers, "sync" → conflicts,
@@ -406,6 +460,33 @@ neutral wording enforced by both the prompt and a guardrail.
 Only stores what someone explicitly asks it to remember ("remember that…", "yaad rakhna ki…"). A newer fact
 on the same topic replaces the older one, and "forget …" removes one. Only leaders can change memory; members
 can ask what's remembered.
+
+### AI project manager (`pm_ai.py`)
+Single AI calls followed by strict checks; each has a rule-based fallback.
+- **Planner:** notes → proposed tasks, saved as a draft. Every item is checked before it's shown: owners must be
+  on the team, values must be allowed, dates must be real, dependencies may only point backwards, secrets are
+  removed, and each item must quote the words in the notes it came from. Items not found in the notes, or that
+  duplicate an existing task, start unticked. The leader ticks items and confirms; prompt injection in the
+  notes can't create or assign anything.
+- **Update drafts:** written only from what's linked to the task. If the AI adds a percentage, a link or a
+  judgement, the rule-based draft is used instead.
+- **Weekly summary:** written from the week's facts, citing a task for every statement. If it cites unknown
+  tasks, cites none, or judges people, the rule-based summary is used instead.
+- **Do next:** plain sorting (blocked, late, due soon, then work others wait for). No AI.
+
+### Daily check-ins (`pm_monitor.py`)
+12 checks over the plan, without AI, each stated as facts plus a suggestion:
+
+- pace forecast, behind, overdue
+- a task that waits for one due later
+- stale blockers, silent work
+- reviews and requests left waiting
+- heavy weeks, milestones at risk
+- unassigned work
+- GitHub/Notion disagreements
+
+Each situation is tracked once (resolved when it ends, reopened if it returns). The leader gets one note a day,
+and the people on a stale or silent task get one gentle nudge. Members see the check-ins about their own work.
 
 ### Verifier (`verifier.py`)
 Splits each answer into statements and has an AI judge check each one against the **full source it cites**,
@@ -541,6 +622,14 @@ team or get your team's agreement. Runs without a key are tested to make no netw
 - Discord is opt-in. Leaving deletes the person's messages and every derived copy. Retention limits apply to
   logs and the AI cache.
 - The audit log records sign-ins, changes and refused attempts, never passwords or message text.
+- **Project management:** members can change only tasks assigned to them, and only up to "Under review". Two
+  people saving the same task at once can't overwrite each other: the later save is refused with "reload".
+  Changes are rate-limited.
+- **No AI acts alone:** proposals need a leader's confirmation, drafts need the member's save, and check-ins
+  only suggest. Planner and summary output is checked against allowed values and its source notes or facts.
+- **AI assistant connections (MCP):** personal tokens, stored as hashes and read-only by default. Each acts as
+  its owner with the same permission checks, can't assign, approve, complete or delete, and is cut off by a
+  reset, password change or deactivation.
 
 Full details: [SECURITY.md](SECURITY.md) (both pre-launch checklists) and [AUDIT.md](AUDIT.md) (findings,
 fixes, deployment checklist, open risks).
@@ -561,7 +650,7 @@ fixes, deployment checklist, open risks).
    TEAMPULSE_DEMO_QUESTION_LIMIT = "15"
    ```
 3. Deploy. Public demo mode uses only the fictional team and resets it daily. It has one-click "Explore as
-   Neha / Kabir" buttons, limits questions per visitor, and switches off account and settings changes so one
+   Neha / Kabir / Aman / Riya" buttons, limits questions per visitor, and switches off account and settings changes so one
    visitor can't change things for everyone. **Never deploy a real team's database publicly.**
 
 Apps sleep after 12 hours without visitors, so open yours a few minutes before you present.
@@ -684,6 +773,10 @@ SECURITY.md · AUDIT.md      security design and checklists · production-readin
   team's labels and verdicts.
 - **Not yet run against live GitHub, Notion and Discord accounts.** All three integrations are built and
   tested offline. Use **Data sources → Run check** when connecting.
+- **The AI planner hasn't been measured with a real AI yet** (rules alone: 79% of tasks found). Run
+  `python -m teampulse.eval.agents --only planner` with a key.
+- **MCP was tested with the SDK's own client**, including as a real subprocess, but not yet in Claude Desktop
+  itself.
 - **Correctness is keyword-based**: an answer can be right in words the checker doesn't expect. RAGAS and the
   LangSmith experiments give a second view.
 - **Free tiers:** quotas run out (one full evaluation is a large share of Groq's daily 200k tokens), and
@@ -698,17 +791,23 @@ SECURITY.md · AUDIT.md      security design and checklists · production-readin
 
 ## 16. Status and next steps
 
-**Built:** project management phase 1 (projects, tasks, My work, board, leader dashboard, permissions);
-ingestion from all three sources; five specialist agents and the Supervisor; Verifier; guardrails;
-the full web app with accounts and roles; security hardening and audit; per-agent evaluation with RAGAS and
-LangSmith; CI on Linux and Windows.
+**About 85% complete overall.** The building is essentially done; what remains is running it for real.
+
+| Part | Done |
+|---|---|
+| Watching the sources: conflicts, Hinglish blockers, contribution reports, Ask, memory | ~100% |
+| Project management: all five phases of the 2.0 plan ([details](docs/TEAMPULSE_2.md#where-the-upgrade-plan-stands)) | ~95% |
+| UI | ~95% |
+| Security, accounts, roles, MCP access | ~100% |
+| Tests and CI (288 tests, real-browser test, Linux and Windows) | ~100% |
+| Evaluation with a real AI | ~60% |
+| Real-world use with a live team | ~10% |
+| Public deployment and demo video | ~30% |
 
 **Next:**
-1. Project management phases 2–5: calendar and timeline views, GitHub/Notion sync for planned tasks, the AI
-   project manager (it proposes and the leader confirms), and proactive monitoring
-   ([roadmap](docs/TEAMPULSE_2.md#7-roadmap-later-rounds)).
-2. One full evaluation on `gpt-oss-120b` for the report (`python -m teampulse.eval.agents` +
-   `python -m teampulse.eval.langsmith_eval`).
-3. Connect your real team (ideally with Ollama) and run it for 2–3 weeks.
-4. Label ~300 messages, correct ~100 links and give verdicts on conflicts. These give the real-world numbers.
-5. Deploy the public demo and record a backup demo video.
+1. One full evaluation on `gpt-oss-120b` for the report: `python -m teampulse.eval.agents` (now including the
+   planner), then `python -m teampulse.eval.langsmith_eval`. Then update the results table in section 9.
+2. Deploy the public demo (section 11) and record a backup demo video.
+3. Connect your real team (ideally with Ollama) and use it for 2–3 weeks.
+4. Label ~300 messages, correct ~100 links and give verdicts on conflicts. These give real-world numbers.
+5. Small extras if there's time: drag-and-drop board, email notifications, check-in thresholds as settings.
