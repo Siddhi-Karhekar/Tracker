@@ -5,7 +5,8 @@
 
 Uses the same patterns TeamPulse removes from AI requests at runtime (teampulse/guardrails.py SECRET), plus private
 keys. Test fixtures use obvious placeholders (gsk_AAAA…, gsk_abcdefgh…); those are skipped. Anything
-else is reported with file/commit and line, with the secret itself masked. If this ever fires on a real key: revoke the
+else is reported with file/commit and line, with the secret itself masked. A fake value already in the history can
+be allowed by adding its full fingerprint (shown in the report) to .secrets-allowlist, never the value itself. If this ever fires on a real key: revoke the
 key first (that's what makes it safe), then clean it from history.
 """
 from __future__ import annotations
@@ -22,6 +23,18 @@ from teampulse.guardrails import SECRET  # noqa: E402
 
 PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")
 SKIP_FILES = {"requirements.lock"}
+ALLOWLIST = ROOT / ".secrets-allowlist"   # SHA-256 fingerprints of known fake values in test history, never the values
+
+
+def fingerprint(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.strip().encode()).hexdigest()
+
+
+def allowed() -> set[str]:
+    if not ALLOWLIST.exists():
+        return set()
+    return {line.split("#")[0].strip() for line in ALLOWLIST.read_text().splitlines() if line.split("#")[0].strip()}
 
 
 def placeholder(secret: str) -> bool:
@@ -34,20 +47,22 @@ def mask(secret: str) -> str:
     return secret[:6] + "…" + f"({len(secret)} chars)"
 
 
-def findings_in(text: str) -> list[tuple[int, str]]:
+def findings_in(text: str, ok: set[str] | None = None) -> list[tuple[int, str]]:
+    ok = allowed() if ok is None else ok
     out = []
     for n, line in enumerate(text.splitlines(), 1):
         for m in SECRET.finditer(line):
-            if not placeholder(m.group(0)):
-                out.append((n, mask(m.group(0))))
-        if PRIVATE_KEY.search(line):
-            out.append((n, "private key"))
+            if not placeholder(m.group(0)) and fingerprint(m.group(0)) not in ok:
+                out.append((n, mask(m.group(0)) + f" [fingerprint {fingerprint(m.group(0))[:16]}]"))
+        found = PRIVATE_KEY.search(line)
+        if found and fingerprint(line) not in ok:
+            out.append((n, f"private key [fingerprint {fingerprint(line)[:16]}]"))
     return out
 
 
 def scan_tree() -> list[str]:
     files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
-    hits = []
+    hits, ok = [], allowed()
     for name in files:
         if name in SKIP_FILES:
             continue
@@ -55,21 +70,21 @@ def scan_tree() -> list[str]:
             text = (ROOT / name).read_text(encoding="utf-8")
         except (UnicodeDecodeError, FileNotFoundError):
             continue
-        hits += [f"{name}:{n}: {what}" for n, what in findings_in(text)]
+        hits += [f"{name}:{n}: {what}" for n, what in findings_in(text, ok)]
     return hits
 
 
 def scan_history() -> list[str]:
     log = subprocess.run(["git", "log", "-p", "--all", "--no-color", "--format=COMMIT %H"], cwd=ROOT,
                          capture_output=True, text=True, check=True, encoding="utf-8", errors="replace").stdout
-    hits, commit, path = [], "?", "?"
+    hits, commit, path, ok = [], "?", "?", allowed()
     for line in log.splitlines():
         if line.startswith("COMMIT "):
             commit = line[7:15]
         elif line.startswith("+++ b/"):
             path = line[6:]
         elif line.startswith("+") and not line.startswith("+++") and path not in SKIP_FILES:
-            hits += [f"commit {commit} {path}: {what}" for _, what in findings_in(line[1:])]
+            hits += [f"commit {commit} {path}: {what}" for _, what in findings_in(line[1:], ok)]
     return sorted(set(hits))
 
 

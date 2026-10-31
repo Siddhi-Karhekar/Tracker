@@ -350,7 +350,10 @@ def test_security_page_reports_tampering(team):  # noqa: F811
 def test_secret_scanner():
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "scripts"))
     import scan_secrets
-    assert scan_secrets.findings_in("token = 'gsk_Xq9vLm2Pz7Rt4Wn8Ks1Bd6Hf3Jy5Cg0Ae'")
-    assert scan_secrets.findings_in("-----BEGIN OPENSSH PRIVATE KEY-----")
-    assert not scan_secrets.findings_in("gsk_" + "A" * 40 + " and gsk_abcdefghijklmnopqrstuvwxyz123456")
+    # Built from pieces, so this file never contains something that looks like a real key (the scan reads it too).
+    fake = "gsk" + "_Q7wE2rT9yU4iO1pA6sD3fG8hJ5kL0zXc"
+    assert scan_secrets.findings_in(f"token = '{fake}'", ok=set())
+    assert scan_secrets.findings_in("-----BEGIN " + "RSA PRIVATE KEY-----", ok=set())
+    assert not scan_secrets.findings_in(f"token = '{fake}'", ok={scan_secrets.fingerprint(fake)})   # allowlisted
+    assert not scan_secrets.findings_in("gsk_" + "A" * 40 + " and gsk_abcdefghijklmnopqrstuvwxyz123456", ok=set())
     assert scan_secrets.scan_tree() == []                       # nothing real in the repository
