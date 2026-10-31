@@ -17,4 +17,7 @@ arize-phoenix-otel>=0.9
 openinference-instrumentation-langchain>=0.1
 openinference-instrumentation-openai>=0.1
 
+# TeamPulse 2.0: MCP server for AI assistants (python -m teampulse.mcp_server)
+mcp>=2.3
+
 pytest>=8.0

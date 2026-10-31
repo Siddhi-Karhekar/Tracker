@@ -115,6 +115,28 @@ edits, with who and when. Passwords and message text are never logged.
 | 19 | Force HTTPS | Streamlit Community Cloud forces HTTPS. If you self-host, put it behind a reverse proxy with HTTPS (e.g. Caddy). |
 | 20 | Scan dependencies | Done with `pip-audit` on the full lock file, in CI on every push (see 1.18). |
 
+## AI assistant connections (MCP)
+
+People can connect Claude Desktop (or another MCP client) to TeamPulse with a personal token (My account →
+Connect an AI assistant).
+
+- **The token acts as its owner and never has more than their role.** Each tool calls the same permission
+  checks as the pages, on every call, so a member's assistant sees only their own workspace and changes only
+  their own tasks.
+- **Read-only by default.** "Read and update" adds only own-task actions (comment, progress, blocker, send for
+  review) and, for leaders, proposals that are confirmed in the app. Assigning, deadlines, approval, completion
+  and deletion are not exposed at all.
+- **Stored like sessions.** Only a SHA-256 hash is stored, and the token is shown once. Tokens expire after 90
+  days; each person can have at most 5.
+- **Cut off immediately** when removed (by the owner, or by a leader under Team & access), on a password reset,
+  password change or "sign out of other devices", and when the account is deactivated.
+- **Logged and limited.** Calls appear in the activity log as `mcp.<tool>`; refusals are logged too. There's a
+  limit of 120 calls per 10 minutes per person.
+- **Local only.** The server runs on the person's computer over stdio and opens no port. It's off in the public
+  demo.
+- **Prompt injection.** Task text, comments and evidence are written by team members, so the server tells the
+  assistant to treat them as data. The real protection is that no tool can do more than the person could.
+
 ## Settings
 
 | Setting | Default | What it does |

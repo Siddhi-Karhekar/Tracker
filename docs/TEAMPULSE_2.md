@@ -46,6 +46,20 @@ The Model Context Protocol (MCP) lets an AI assistant call tools on a server. We
 Decision: no MCP in phase 1. The functions an MCP server would call are designed for it: each takes the
 signed-in person and checks permission itself.
 
+**Update (round 5): TeamPulse is now an MCP server** (`python -m teampulse.mcp_server`), built on the official
+Python SDK (`mcp` 2.x).
+
+- **Tools:**
+  - 6 read tools: my tasks, what next, a task with its GitHub/Notion evidence, search, project status,
+    notifications
+  - 5 write tools, limited to the person's own work: comment, report progress, report a blocker, send for review,
+    and (leaders) propose tasks as a draft
+- **Access:** each person creates a token on My account, read-only or read and update.
+- **Permissions:** the same checks as the pages run on every call.
+- **Not exposed:** assigning, deadlines, approving, completing and deleting.
+
+TeamPulse as an MCP **client** is still not worth it, for the reasons above.
+
 ## 3. What phase 1 delivers
 
 **Projects and milestones.** The leader creates projects with dates and milestones.
@@ -202,6 +216,8 @@ Checked in `teampulse/pm.py` on every call, before anything is written. Refusals
 | Approve or decline deadline requests | ✅ | ❌ | ❌ |
 | Comment, @mention | ✅ | ✅ | ✅ |
 | Plan with AI (propose, accept, discard) | ✅ | ❌ | ❌ |
+| Connect an AI assistant (MCP) as yourself | ✅ | ✅ | ✅ |
+| Remove anyone's AI assistant connection | ✅ | own only | own only |
 | Draft a progress update with AI | ✅ | ✅ | ❌ |
 | Weekly summary | ✅ | ❌ | ❌ |
 | Archive a task | ✅ | ❌ | ❌ |
@@ -231,6 +247,7 @@ erDiagram
     pm_tasks ||--o| pm_source_links : "linked to"
     tasks ||--o| pm_source_links : "GitHub issue / Notion page"
     pm_projects ||--o{ pm_ai_drafts : "AI proposals and summaries"
+    users ||--o{ api_tokens : "AI assistant connections"
     pm_tasks |o--o{ pm_notifications : about
     users }o--|| members : "member_name links"
 ```
@@ -295,7 +312,7 @@ Run it with `TEAMPULSE_E2E=1 python -m pytest tests/e2e`; CI runs it on every pu
 |---|---|
 | 2. Views and collaboration | ~~Calendar and timeline views~~, ~~deadline reminders~~, ~~evidence links~~ (done in round 2). Still to do: edit and delete your own comments, email digest of notifications, drag-and-drop board (needs a custom component) |
 | 3. Sync | ~~Link planned tasks to GitHub issues and Notion pages, show what each source says and the evidence, flag disagreements, import unplanned issues~~ (done in round 3). Still to do: webhooks for faster updates (the pollers run every 5 minutes) |
-| 4. AI project manager | ~~Planner with confirmation, do next, update drafts, weekly summary~~ (done in round 4). Still to do: TeamPulse as an MCP server |
+| 4. AI project manager | ~~Planner with confirmation, do next, update drafts, weekly summary~~ (round 4), ~~TeamPulse as an MCP server~~ (round 5) |
 | 5. Proactive monitoring | Daily check for slipping tasks, overloaded people and stale blockers. It suggests; it never changes a task by itself. Weekly summary for the leader. |
 
 ---
@@ -323,7 +340,7 @@ actually contains.
 | Webhooks and scheduled sync | Scheduled polling every 5 minutes; no webhooks (they need a public server) | Partially implemented |
 | Separate status, self-reported progress, verified progress, review status | `status` (with Under review), `reported_progress`, `verified_progress` | Fully implemented |
 | Completion not an average of percentages | Completion by size, explained on the page | Fully implemented |
-| Selective MCP gateway with read and write tools | Assessed in section 2; deferred to phase 4 | Not implemented |
+| Selective MCP gateway with read and write tools | `teampulse/mcp_server.py`: allowlisted read tools, and own-work write tools only with a "read and update" token; personal tokens, same permission checks, audit, rate limit | Fully implemented (as a server; as a client it isn't needed) |
 | LangGraph supervisor and specialist agents | Supervisor plus five specialists (retrieval, blockers, conflicts, contributions, memory) and a Verifier | Fully implemented |
 | Only relevant agents per question | The supervisor's router picks specialists per question (keyword fallback when the AI is unavailable) | Fully implemented |
 | Task-planning agent, reporting agent, human approval with checkpoints | `pm_ai.py`: the planner and weekly summary. Drafts persist in `pm_ai_drafts` until a leader accepts or discards them, so approval can happen later or on another device. They're plain function calls, not LangGraph nodes, because each is one AI call with no branching. | Fully implemented |
@@ -510,3 +527,60 @@ They also cover:
 - Editing dependencies isn't possible in the proposal table. They come from the AI and can be changed on the
   task after it's created.
 - Summaries are kept as drafts on the dashboard; they aren't sent by email or chat.
+
+## 12. Round 5 report (TeamPulse as an MCP server)
+
+**Features completed:**
+
+- personal access tokens (read only, or read and update) on My account, with the Claude Desktop settings
+  generated to paste (shown once)
+- leaders see and remove everyone's connections under Team & access
+- a stdio MCP server with 11 tools, marked read-only or not for the client
+- every call resolves the token again and runs the same permission checks as the pages
+- refusals come back as friendly messages; unexpected errors are hidden by the SDK
+- calls are logged as `mcp.<tool>` and limited to 120 per 10 minutes
+- tokens are revoked with sessions (reset, password change, sign out elsewhere, deactivation)
+
+**Files created:** `teampulse/mcp_server.py`, `teampulse/mcp_tools.py`, `tests/test_mcp.py`.
+
+**Files modified:**
+
+- `teampulse/auth.py`, `teampulse/db.py`
+- `views/account.py`, `views/team.py`
+- `requirements.txt`, `requirements.lock`
+- `README.md`, `SECURITY.md`, this document
+
+**Dependencies:** `mcp` 2.3.0 plus 7 packages it needs (cffi, cryptography, mcp-types, pycparser, pyjwt,
+pywin32 on Windows only, sse-starlette). No existing version changed. `pip-audit` finds no known
+vulnerabilities.
+
+**Database changes:** new table `api_tokens`.
+
+**Tests executed:**
+
+- `python -m pytest -q`: **275 passed**, 1 skipped (the browser test)
+- `TEAMPULSE_E2E=1 python -m pytest tests/e2e`: **1 passed**
+- `ruff`: clean
+
+The 14 new tests check:
+
+- tokens are hashed, scoped, revocable, expire, and are cut off by reset and deactivation
+- the token limit, and that tokens are off in the public demo
+- a member sees only their own workspace
+- leader-only status details
+- a read token can't write, and a write token can't touch others' tasks
+- a leader's proposal creates only a draft
+- no tool can assign, complete or delete
+- a token revoked mid-session stops working on the next call
+- every call is logged
+- the rate limit
+- evidence and the injection warning are included
+- the server works as a **real subprocess over stdio**, started from a different folder (as Claude Desktop
+  does), and refuses a bad token
+- the account page shows a token once and removes it
+
+**Known issues:**
+
+- I tested with the SDK's own client; I haven't tried it in Claude Desktop itself, which isn't available here.
+- There's no remote (HTTP) mode. That would need a public server with TLS and OAuth, which a student team on
+  free tools usually doesn't have.

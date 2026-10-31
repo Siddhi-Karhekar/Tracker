@@ -1,7 +1,50 @@
 """My account: change your password (required after a one-time password), and sign out everywhere."""
 import streamlit as st
 
-from teampulse import auth, ui, webapp
+import json
+import sys
+from pathlib import Path
+
+from teampulse import auth, config, ui, webapp
+
+
+def ai_assistant_section(conn, actor):
+    """Connect Claude Desktop (or another MCP client) to TeamPulse as yourself."""
+    st.subheader("Connect an AI assistant")
+    st.caption("Lets Claude Desktop (or any MCP client) answer “what's on my plate?” or “what's blocking #4?” from "
+               "TeamPulse, as you, with your permissions. Read-only by default. It runs on this computer; the "
+               "assistant asks you before it changes anything. Removing a connection, a password reset or "
+               "“sign out of other devices” cuts it off at once.")
+    new = st.session_state.pop("new_api_token", None)
+    if new:
+        st.success("Connection created. Copy this now: it won't be shown again.")
+        root = Path(__file__).resolve().parents[1]   # the TeamPulse folder, so it works from any directory
+        env = {"TEAMPULSE_TOKEN": new, "TEAMPULSE_DB": str(Path(config.DB_PATH).resolve()), "PYTHONPATH": str(root)}
+        snippet = {"mcpServers": {"teampulse": {"command": sys.executable, "args": ["-m", "teampulse.mcp_server"],
+                                                "env": env}}}
+        st.code(json.dumps(snippet, indent=2), language="json")
+        st.caption("Paste it into Claude Desktop → Settings → Developer → Edit config (claude_desktop_config.json), "
+                   "then restart Claude Desktop. Keep the token private like a password.")
+    with st.form("new-token", clear_on_submit=True, border=False):
+        c1, c2 = st.columns([2, 2])
+        name = c1.text_input("Name", value="Claude Desktop", max_chars=60)
+        scope = c2.radio("Access", list(auth.TOKEN_SCOPES), format_func=auth.TOKEN_SCOPES.get, horizontal=True)
+        if st.form_submit_button("Create connection", icon=":material/key:"):
+            try:
+                st.session_state["new_api_token"] = auth.create_api_token(conn, actor, name, scope)
+                st.rerun()
+            except auth.AuthError as exc:
+                st.error(str(exc))
+    for t in auth.list_api_tokens(conn, actor):
+        c1, c2 = st.columns([4, 1])
+        c1.markdown(f"**{ui.e(t['name'])}** {ui.pill(auth.TOKEN_SCOPES[t['scope']], 'quiet')}<br>"
+                    f"<span class='tp-meta'>created {ui.e(ui.ago(t['created_at']))} · last used "
+                    f"{ui.e(ui.ago(t['last_used']))} · expires {ui.e(t['expires_at'][:10])}</span>",
+                    unsafe_allow_html=True)
+        if c2.button("Remove", key=f"revoke-{t['id']}"):
+            auth.revoke_api_token(conn, actor, t["id"])
+            st.rerun()
+
 
 agent = webapp.get_agent()
 conn = agent.conn
@@ -50,4 +93,7 @@ with left:
         if st.button("Sign out of other devices", icon=":material/devices:"):
             auth.revoke_all(conn, actor.id, except_token=st.session_state.get(webapp.TOKEN_KEY))
             auth.audit(conn, actor, "auth.revoke_others", actor.username)
-            st.success("Signed out of every other device.")
+            st.success("Signed out of every other device, and removed every AI assistant connection.")
+
+        if webapp.auth_enabled() and not webapp.public_demo():
+            ai_assistant_section(conn, actor)

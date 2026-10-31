@@ -250,6 +250,29 @@ The full project-management permission matrix is in [docs/TEAMPULSE_2.md](docs/T
 Roles are enforced on the server for every action. Hiding a page also hides it from the Ask chat. More in
 [SECURITY.md](SECURITY.md).
 
+### Use TeamPulse from Claude Desktop (MCP)
+
+You can ask an AI assistant "what's on my plate?", "what's blocking #4?" or "how is the project going?" and get
+the answers from TeamPulse, as yourself, with your permissions.
+
+1. **My account → Connect an AI assistant.** Choose **Read only**, or **Read, and update my own tasks**, then
+   press **Create connection**.
+2. Copy the settings it shows (shown once) into Claude Desktop → Settings → Developer → Edit config, then
+   restart Claude Desktop.
+
+It runs on your computer over stdio: no port is opened, and nothing goes anywhere except to the assistant you
+connected.
+
+| Tool | Does | Needs |
+|---|---|---|
+| `my_tasks`, `what_next`, `get_task`, `search_tasks`, `project_status`, `notifications` | Read your workspace, a task (with GitHub/Notion evidence), the project | any connection |
+| `add_comment`, `report_progress`, `report_blocker`, `send_for_review` | Update **your own** tasks, as on the task panel | "read and update" |
+| `propose_tasks` | Turn notes into a proposal; nothing is created until you confirm it in the app | "read and update", leader |
+
+The tools can't assign, change deadlines, approve, complete or delete; those stay in the app. Every call is
+checked against your account. Removing the connection, a password reset or "sign out of other devices" cuts it
+off at once. Leaders see everyone's connections under Team & access.
+
 ---
 
 ## 5. Connecting your real team
@@ -416,7 +439,7 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **261 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **275 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
 regression test for every bug found by real AI runs, and project management (permissions per role and per
 assignee, workflow rules, two people editing at once, both roles through the pages). A Playwright test runs the
@@ -578,6 +601,8 @@ All settings live in `.env` (copy `.env.example`). Only an AI key is needed for 
 | | `TEAMPULSE_SESSION_HOURS` / `TEAMPULSE_IDLE_MINUTES` | `12` / `60` | Session limits |
 | | `TEAMPULSE_ASK_PER_HOUR` | `60` | Questions per person per hour |
 | | `TEAMPULSE_CONTRIB_REVIEW` | `on` | Members approve their own report |
+| AI assistant (MCP) | `TEAMPULSE_TOKEN` | – | Set in Claude Desktop's settings, not in `.env` (see 4) |
+| | `TEAMPULSE_MCP_AI` | `on` | `off`: `propose_tasks` uses the rules instead of your AI provider |
 | Demo | `TEAMPULSE_PUBLIC_DEMO` / `TEAMPULSE_DEMO_QUESTION_LIMIT` | `off` / `15` | Public demo mode |
 | Retention | `TEAMPULSE_AUDIT_DAYS` / `TEAMPULSE_CACHE_DAYS` | `180` / `30` | Activity log / AI cache |
 | Backups | `TEAMPULSE_BACKUP_DIR` / `TEAMPULSE_BACKUP_KEEP` | – / `14` | Daily backups from the poll loop |
@@ -611,6 +636,7 @@ teampulse/
   pm.py, pm_ui.py           project management: rules and permission checks; task cards and task panel
   pm_sync.py                planned tasks ↔ GitHub issues / Notion pages: evidence, disagreements, import
   pm_ai.py                  AI planner (propose → confirm), do next, progress-update drafts, weekly summary
+  mcp_server.py, mcp_tools.py  TeamPulse as an MCP server for Claude Desktop; personal tokens in auth.py
   ui.py, webapp.py          design system, shared page helpers, public demo mode
   health.py                 connection checks and process status
   maintenance.py            retention purge, verified backup and restore
@@ -621,7 +647,7 @@ teampulse/
 eval_data/                  18 golden questions (with reference answers), 60 Hinglish messages,
                             agent cases, thresholds
 docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
-tests/                      261 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
+tests/                      275 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment

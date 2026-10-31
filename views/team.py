@@ -31,7 +31,8 @@ if locked:
     st.info("Account and access changes are switched off in the public demo, so one visitor can't change them "
             "for everyone else. You can still look around; it all works on your own copy.")
 show_credentials()
-add, people, visibility, activity = st.tabs(["Add a teammate", "Accounts", "What members can see", "Activity"])
+add, people, visibility, assistants, activity = st.tabs(["Add a teammate", "Accounts", "What members can see",
+                                                         "AI assistant connections", "Activity"])
 
 with add:
     members = [r[0] for r in conn.execute("SELECT display_name FROM members ORDER BY display_name")]
@@ -84,6 +85,20 @@ with people:
                         st.rerun()
                     except (auth.AuthError, auth.PermissionDenied) as exc:
                         st.error(str(exc))
+
+with assistants:
+    st.caption("Personal connections people made for an AI assistant (MCP). Each acts as its owner, never with more "
+               "than their role. Calls appear in Activity as mcp.<tool>.")
+    tokens = auth.list_api_tokens(conn, actor, everyone=True)
+    if not tokens:
+        st.caption("None.")
+    for t in tokens:
+        c1, c2 = st.columns([4, 1])
+        c1.markdown(f"**{ui.e(t['display_name'])}**: {ui.e(t['name'])} {ui.pill(auth.TOKEN_SCOPES[t['scope']], 'quiet')} "
+                    f"<span class='tp-meta'>last used {ui.e(ui.ago(t['last_used']))}</span>", unsafe_allow_html=True)
+        if c2.button("Remove", key=f"team-revoke-{t['id']}"):
+            auth.revoke_api_token(conn, actor, t["id"])
+            st.rerun()
 
 with visibility:
     st.markdown("<p class='tp-meta'>Team members can open these pages, read-only. My work and Project board are always "

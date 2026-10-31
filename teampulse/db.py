@@ -357,6 +357,21 @@ CREATE TABLE IF NOT EXISTS pm_source_links (
     linked_by     TEXT,
     linked_at     TEXT NOT NULL
 );
+-- Personal access tokens for an AI assistant (MCP). Like sessions, only a hash is stored. scope 'read' can only
+-- look; 'write' can also update the person's own tasks. They never give more than the person's own role allows.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    token_hash  TEXT NOT NULL UNIQUE,
+    scope       TEXT NOT NULL CHECK (scope IN ('read', 'write')),
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    last_used   TEXT,
+    revoked_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+
 -- Phase 4: what the AI proposed, kept until a person accepts or discards it. Nothing in here is a task until a
 -- leader confirms it; then the created task ids are recorded.
 CREATE TABLE IF NOT EXISTS pm_ai_drafts (
