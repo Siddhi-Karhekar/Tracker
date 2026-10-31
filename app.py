@@ -37,6 +37,7 @@ PAGES = {   # key: (file, title, icon, group)
     "tasks": ("views/tasks.py", "Source tasks", ":material/checklist:", "Team health"),
     "contributions": ("views/contributions.py", "Contributions", ":material/diversity_3:", "People"),
     "team": ("views/team.py", "Team & access", ":material/admin_panel_settings:", "Admin"),
+    "security": ("views/security.py", "Security", ":material/shield:", "Admin"),
     "sources": ("views/sources.py", "Data sources", ":material/cable:", "Setup"),
     "memory": ("views/memory.py", "Team memory", ":material/push_pin:", "Setup"),
     "label": ("views/label.py", "Label chat", ":material/label:", "Setup"),

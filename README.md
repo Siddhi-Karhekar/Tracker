@@ -74,10 +74,15 @@ plans the work, checks it against what's really happening, and says early when s
 
 Underneath it all:
 
-- **Sign-in with two roles**, checked on the server for every action.
+- **Zero-trust security**, checked on the server for every action:
+  - deny-by-default permissions, plus capabilities a leader can grant to a member;
+  - your password again for high-impact changes;
+  - a tamper-evident activity log and encrypted backups;
+  - secrets removed before anything is sent to an AI;
+  - a Security page that shows only measured numbers.
 - **Guardrails** on every AI answer.
 - **Evaluation**: a full suite per agent, plus RAGAS and LangSmith.
-- **Tests**: 288 automated tests, plus a real-browser test.
+- **Tests**: 309 automated tests, plus a real-browser test.
 
 The design decisions, permission matrix and data model for project management are in
 [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
@@ -175,7 +180,7 @@ not graphs.
 | AI assistant access | Official MCP Python SDK (`mcp` 2.x), stdio |
 | Sources | discord.py, GitHub REST API, Notion API |
 | Evaluation | pytest, Playwright (real browser), RAGAS 0.4, LangSmith, Arize Phoenix (optional tracing) |
-| CI | GitHub Actions: Linux (Python 3.12 and 3.13), Windows, real-browser test, lint, dependency scan, RAGAS wiring |
+| CI | GitHub Actions: Linux (Python 3.12 and 3.13), Windows, real-browser test, lint, dependency scan, secret scan of the full history, authorization coverage, RAGAS wiring |
 
 ---
 
@@ -273,7 +278,8 @@ A canteen pre-order app built by **Riya** (frontend), **Aman** (backend), **Kabi
 | **Conflicts** | Where sources disagree, both sides linked, severity, suggested fix; leaders mark real / false alarm |
 | **Source tasks** | Every GitHub issue and Notion task, with the status, owner and deadline each source gives it; leaders correct chat→task links |
 | **Contributions** | Evidence-based reports; each member reviews, adds context and approves their own |
-| **Team & access** (leader) | Create accounts, one-time passwords, reset or deactivate, choose what members see, everyone's AI assistant connections, activity log |
+| **Team & access** (leader) | Create accounts, one-time passwords, reset or deactivate (after confirming your password), grant members extra capabilities, choose what members see, everyone's AI assistant connections, activity log |
+| **Security** (leader, or audit access) | Measured security: actions behind a permission check, activity log intact, refusals, failed sign-ins, permission changes, AI-assistant use, guardrail detections, secrets kept from the AI, backups |
 | **Data sources** (leader) | Freshness, whether the poller and bot are running, connection check with exact fixes, AI test |
 | **Team memory** | Remembered facts, checked against live data |
 | **Label chat** (leader) | Label messages by hand to measure the classifier on your own data |
@@ -523,7 +529,7 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **288 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **309 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
 regression test for every bug found by real AI runs, and project management (permissions per role and per
 assignee, workflow rules, two people editing at once, both roles through the pages). A Playwright test runs the
@@ -621,7 +627,21 @@ team or get your team's agreement. Runs without a key are tested to make no netw
   are never shown.
 - Discord is opt-in. Leaving deletes the person's messages and every derived copy. Retention limits apply to
   logs and the AI cache.
-- The audit log records sign-ins, changes and refused attempts, never passwords or message text.
+- The audit log records sign-ins, changes and refused attempts, never passwords or message text. It's
+  **tamper-evident**: each entry is chained to the one before by hash, and the Security page shows if anything
+  was changed or removed.
+- **Deny by default, one decision point.** `auth.authorize()` checks the capability and then whether it's *your*
+  task, report, workspace or token. A source scan proves every action reaches a check (61/61), and CI fails if
+  a new one doesn't.
+- **Grantable capabilities.** A leader can make a member a co-lead, or give them audit access, without making
+  them an admin. Account and security administration can't be granted. Changes apply on the next request.
+- **Confirm it's you.** Password resets, deactivation, new leaders and capability changes need your password from
+  the last 10 minutes, in this session.
+- **Secrets never reach an AI provider.** Keys and tokens are removed from every AI request before it's sent.
+- **Encrypted backups** (`TEAMPULSE_BACKUP_KEY`). The snapshot is checked in memory, so no plaintext copy is
+  written.
+- **One team per install.** Separate database, index and cache files, so teams can't see each other's data.
+- **Secret scanning.** CI checks every file and the whole git history for API keys.
 - **Project management:** members can change only tasks assigned to them, and only up to "Under review". Two
   people saving the same task at once can't overwrite each other: the later save is refused with "reload".
   Changes are rate-limited.
@@ -698,6 +718,7 @@ All settings live in `.env` (copy `.env.example`). Only an AI key is needed for 
 | Demo | `TEAMPULSE_PUBLIC_DEMO` / `TEAMPULSE_DEMO_QUESTION_LIMIT` | `off` / `15` | Public demo mode |
 | Retention | `TEAMPULSE_AUDIT_DAYS` / `TEAMPULSE_CACHE_DAYS` | `180` / `30` | Activity log / AI cache |
 | Backups | `TEAMPULSE_BACKUP_DIR` / `TEAMPULSE_BACKUP_KEEP` | – / `14` | Daily backups from the poll loop |
+| | `TEAMPULSE_BACKUP_KEY` | – | Encrypt backups (`python -m teampulse.maintenance new-key`) |
 | Tracing | `TEAMPULSE_TRACING`, `PHOENIX_COLLECTOR_ENDPOINT` | `off` | Arize Phoenix (local) |
 | | `LANGSMITH_API_KEY` / `LANGSMITH_TRACING` | – / `false` | LangSmith experiments / live traces |
 
@@ -730,6 +751,7 @@ teampulse/
   pm_ai.py                  AI planner (propose → confirm), do next, progress-update drafts, weekly summary
   mcp_server.py, mcp_tools.py  TeamPulse as an MCP server for Claude Desktop; personal tokens in auth.py
   pm_monitor.py             daily check-ins: 12 checks, suggestions only
+  security.py               authorization coverage (from the code) and the Security page's measurements
   ui.py, webapp.py          design system, shared page helpers, public demo mode
   health.py                 connection checks and process status
   maintenance.py            retention purge, verified backup and restore
@@ -740,7 +762,8 @@ teampulse/
 eval_data/                  18 golden questions (with reference answers), 60 Hinglish messages,
                             agent cases, thresholds
 docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
-tests/                      288 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
+scripts/scan_secrets.py     secret scan of every tracked file and the full git history (CI)
+tests/                      309 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment
@@ -798,8 +821,8 @@ SECURITY.md · AUDIT.md      security design and checklists · production-readin
 | Watching the sources: conflicts, Hinglish blockers, contribution reports, Ask, memory | ~100% |
 | Project management: all five phases of the 2.0 plan ([details](docs/TEAMPULSE_2.md#where-the-upgrade-plan-stands)) | ~95% |
 | UI | ~95% |
-| Security, accounts, roles, MCP access | ~100% |
-| Tests and CI (288 tests, real-browser test, Linux and Windows) | ~100% |
+| Security (zero trust: policy, grants, re-authentication, tamper-evident log, encrypted backups, secret redaction and scanning, measured Security page) | ~100% |
+| Tests and CI (309 tests, real-browser test, Linux and Windows) | ~100% |
 | Evaluation with a real AI | ~60% |
 | Real-world use with a live team | ~10% |
 | Public deployment and demo video | ~30% |

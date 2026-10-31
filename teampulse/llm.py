@@ -55,6 +55,19 @@ def guard(messages: list[dict]) -> list[dict]:
     return messages
 
 
+def redact(messages: list[dict]) -> tuple[list[dict], int]:
+    """API keys and tokens pasted into chat, issues or pages are removed before any text leaves for an AI provider
+    (and before caching). Returns the cleaned messages and how many were removed."""
+    from teampulse.guardrails import SECRET
+    count = 0
+    out = []
+    for m in messages:
+        text, n = SECRET.subn("[secret removed]", str(m.get("content") or ""))
+        count += n
+        out.append({**m, "content": text})
+    return out, count
+
+
 @dataclass
 class LLMReply:
     text: str
@@ -174,7 +187,13 @@ class LLM:
         return hashlib.sha256(blob.encode()).hexdigest()
 
     def chat(self, messages: list[dict], json_mode: bool = False, temperature: float = 0.0) -> LLMReply:
-        messages = guard(messages)
+        messages, removed = redact(guard(messages))
+        if removed:
+            self.stats["redacted"] = self.stats.get("redacted", 0) + removed
+            log.warning("Removed %d secret(s) from an AI request before sending it", removed)
+            if self.conn is not None:   # counted for the Security page; never the secret itself
+                from teampulse.auth import audit
+                audit(self.conn, None, "security.secret_redacted", "ai request", detail=str(removed))
         key = self._cache_key(messages, json_mode, temperature)
         if self.conn is not None:
             row = self.conn.execute("SELECT response, provider FROM llm_cache WHERE key = ?", (key,)).fetchone()

@@ -97,6 +97,7 @@ def test_deactivated_mid_session_is_signed_out_on_next_click(team):
     at = page("app.py", token)
     assert HERO in text(at)
     leader = auth.login(team, "neha", LEADER_PW)[1]
+    auth.confirm_password(team, leader, LEADER_PW)
     from teampulse import actions
     actions.set_active(team, leader, member.id, False)
     at.run()
@@ -162,7 +163,7 @@ def test_leader_hides_a_page_from_members(team):
 def test_leader_creates_account_and_sees_password_once(team):
     token = auth.login(team, "neha", LEADER_PW)[0]
     at = page("views/team.py", token)
-    at.text_input[0].input("Riya Mehta")
+    next(t for t in at.text_input if t.label == "Name").input("Riya Mehta")
     next(b for b in at.button if b.label == "Create account").click().run()
     assert not at.exception
     shown = " ".join(c.value for c in at.code)
@@ -178,6 +179,10 @@ def test_leader_resets_and_deactivates_from_the_page(team):
     token = auth.login(team, "neha", LEADER_PW)[0]
     kabir_id = team.execute("SELECT id FROM users WHERE username='kabir'").fetchone()[0]
     at = page("views/team.py", token)
+    at.button(key=f"reset-{kabir_id}").click().run()                       # not confirmed yet: refused
+    assert not at.code and any("confirm your password" in e.value for e in at.error)
+    next(t for t in at.text_input if t.label == "Your password").input(LEADER_PW)
+    next(b for b in at.button if b.label == "Confirm").click().run()
     at.button(key=f"reset-{kabir_id}").click().run()
     assert "One-time password:" in " ".join(c.value for c in at.code)
     at.button(key=f"active-{kabir_id}").click().run()

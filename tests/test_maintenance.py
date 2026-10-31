@@ -18,7 +18,8 @@ def test_purge_removes_only_what_is_past_retention(tmp_path, monkeypatch):
     with conn:
         for i, (created, expires, revoked) in enumerate([(ago(40), ago(30), None), (ago(1), ago(-1), None),
                                                          (ago(20), ago(-1), ago(10)), (ago(2), ago(-1), ago(1))]):
-            conn.execute("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)", (f"h{i}", uid, created, created, expires, revoked))
+            conn.execute("INSERT INTO sessions (token_hash, user_id, created_at, last_seen, expires_at, revoked_at) "
+                         "VALUES (?, ?, ?, ?, ?, ?)", (f"h{i}", uid, created, created, expires, revoked))
         conn.executemany("INSERT INTO audit_log (at, action, outcome) VALUES (?, 'x', 'ok')", [(ago(200),), (ago(5),)])
         conn.executemany("INSERT INTO llm_cache VALUES (?, 'r', 'p', ?)", [("old", ago(31)), ("new", ago(1))])
         conn.executemany("INSERT INTO login_throttle VALUES (?, 0, ?)", [("a", ago(1)), ("b", ago(-0.01))])

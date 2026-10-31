@@ -3,9 +3,36 @@
 TeamPulse reads a student team's GitHub, Notion and Discord. Anyone on the team, and anyone who can open an
 issue on a public repo, controls some of the text it shows, so that text is treated as hostile everywhere.
 
-This file covers how accounts and roles work, then goes through two common pre-launch checklists item by item:
+This file covers the security model (zero trust and least privilege), how accounts and roles work, and how
+security is measured. It then goes through two common pre-launch checklists item by item:
 what was fixed, what was already handled, and what doesn't apply (and why). The full audit, with every finding,
 its test and the risks that remain, is in [AUDIT.md](AUDIT.md).
+
+## The security model: zero trust, least privilege
+
+Every request, account, AI agent, integration and AI-generated action is authorized on its own, on the server:
+
+- **Deny by default.** `auth.can()` refuses an unknown permission, a missing account, or an account that still has
+  to choose its password, even for a leader.
+- **One decision point.** `auth.authorize(conn, actor, permission, resource)` checks the capability, then the
+  resource rule: is this *your* task, *your* report, *your* workspace, *your* AI-assistant token? Pages, AI agents
+  and MCP tools all ask it, so they can't disagree.
+- **Every action is checked, and that's proven.** `teampulse/security.py` reads the source of every module that
+  acts for someone. Each public function taking an `actor` must reach a permission check: directly, through
+  another checked function, or because it only touches the caller's own data (listed with the reason). The test
+  suite and CI fail on any function that doesn't. Today that's 61 of 61.
+- **The AI never decides who may see what.** Specialist agents behind pages a member can't open are refused
+  before they run. Contribution data of people who haven't opted in is removed before it reaches the AI, not
+  only filtered afterwards. No AI changes the team's data by itself: planner proposals need a leader's
+  confirmation, update drafts need the member's save, and check-ins only suggest.
+- **Secrets never leave for an AI provider.** API keys and tokens found in chat, issues or pages are removed from
+  every AI request before it's sent or cached. Each removal is counted, but the secret itself is never logged.
+- **One team per install.** Each team runs its own TeamPulse with its own database file, search index folder
+  (next to the database) and AI cache. There is no shared store, so one team's data can't reach another through
+  a query, a retrieval, a cache or a background job. A sign-in or token from one install means nothing on
+  another (tested). This is stronger isolation than `team_id` filtering in a shared database, and it fits
+  student teams. A hosted service for many teams would need the shared-database design, with tenant checks on
+  every query, index, cache and job.
 
 ## Accounts and roles
 
@@ -24,7 +51,40 @@ its test and the risks that remain, is in [AUDIT.md](AUDIT.md).
 | Project management: **tasks assigned to them**: status up to Under review, progress, subtasks, blockers, deadline requests | ✅ | ✅ |
 | Comment on any task | ✅ | ✅ (rate limited) |
 | My work (own workspace), Project board | ✅ (any workspace) | ✅ (own workspace only) |
-| Team dashboard | ✅ | ❌ |
+| Team dashboard | ✅ | ❌ (unless granted co-lead) |
+| Security page | ✅ | ❌ (unless granted audit access) |
+| Grant capabilities to a member | ✅ (after confirming password) | ❌ |
+
+**Grantable capabilities (fine-grained, revocable).** Two roles keep things simple for a small team. On top of
+that, a leader can grant one member specific extra powers under Team & access → Capabilities:
+
+| Capability | Gives |
+|---|---|
+| `pm.manage` (co-lead) | Plan, assign, approve and complete tasks; the Team dashboard |
+| `data.edit` | Mark conflicts, correct chat links, label chat |
+| `data.refresh` | Rebuild tasks, read new chat, compare sources |
+| `memory.write` | Change team memory |
+| `audit.read` | The Security page and the activity log |
+
+Rules:
+
+- **Account and security administration can never be granted.** That covers `users.manage` and
+  `settings.manage`. Only allowlisted capabilities count: a row added to the database by hand for anything else
+  is ignored, so nobody can promote themselves.
+- **Nobody changes their own permissions.** Only active members can receive grants, and every grant and removal
+  is logged.
+- **Changes are immediate.** Permissions are loaded on every request, so a grant or removal applies on the
+  person's next click or AI-assistant call, and deactivation or a reset applies at once.
+
+**Confirming it's you.** These actions need the leader's password from the last 10 minutes, *in this session*:
+
+- resetting a password
+- deactivating an account
+- creating another leader
+- granting or removing capabilities
+
+A stolen or unattended session can't do them, and confirming on one device doesn't unlock another. Wrong
+passwords count towards the same lockout as sign-in.
 
 Members may change only two things: their own contribution report and the tasks assigned to them. A
 contribution report about a person should not be visible to the team until that person has seen it. And the
@@ -137,6 +197,52 @@ Connect an AI assistant).
 - **Prompt injection.** Task text, comments and evidence are written by team members, so the server tells the
   assistant to treat them as data. The real protection is that no tool can do more than the person could.
 
+## Tamper-evident activity log, encrypted backups
+
+- **Activity log.** Every entry stores the hash of the entry before it. Changing or deleting an entry breaks the
+  chain from that point, and the Security page says where. New entries continue from the recorded head hash, so
+  cutting entries off the end stays visible even after new ones are added. Retention may remove the *oldest*
+  entries; the chain then starts at the first one kept. Entries are sealed under SQLite's write lock, so the app,
+  poller and bot writing at once can't fork the chain. Limit: someone with full write access to the database
+  file could rebuild the whole chain. Backups record the head hash, to compare against.
+- **Backups.** Set `TEAMPULSE_BACKUP_KEY` (make one with `python -m teampulse.maintenance new-key`) and backups
+  are written as `.db.enc` with Fernet: AES with an integrity check, so a changed byte is refused.
+  - The snapshot is taken and checked **in memory**, so no unencrypted copy is ever written to disk.
+  - `verify` and `restore` decrypt in memory too. A wrong key, or a damaged or changed file, gives a clear error.
+  - Keep the key somewhere other than the backups.
+
+## Measured, not claimed: the Security page
+
+Leaders (and members granted `audit.read`) see **Admin → Security**. Every number is counted from the activity
+log, the database or the code when the page opens:
+
+- actions behind a permission check (from the code)
+- whether the activity log is intact
+- refused requests, and what was refused
+- failed sign-ins and password confirmations, and locked accounts
+- account and permission changes, and capabilities granted
+- AI-assistant connections (active, can update, expiring) and their calls and refusals
+- guardrail detections and secrets kept from the AI
+- secrets found anywhere in the activity log (should be 0)
+- messages still stored from people who left the Discord opt-in (should be 0)
+- the last backup: when, encrypted or not, verified
+
+A refused request means the controls worked. It's shown as a count, never as a problem score.
+
+| Security objective | How it's checked | Today |
+|---|---|---|
+| Unauthorized access succeeds 0 times | Every write called as a signed-out caller and as the wrong member (tests) | 0 |
+| No data shared between teams | One install per team; tests show sign-ins, tokens, projects and the index don't cross | Separate files |
+| Every action behind a permission check | Source scan in tests and CI | 61 / 61 |
+| No privilege escalation | Grants allowlisted, admin never grantable, no self-grant, tampered rows ignored (tests) | 0 paths |
+| Secrets in logs: 0 | Security page scans the whole activity log; CI scans every file and the full git history | 0 |
+| Secrets sent to an AI provider: 0 | Redaction on every AI request (test with a fake provider) | 0 |
+| Unauthorized AI agent actions: 0 | AI has no write tools; MCP tools can't assign, approve, complete or delete | 0 |
+| Opted-out people's messages kept: 0 | Security page count and privacy tests | 0 |
+| Revocation takes effect | Permissions and tokens re-checked on every request | Next request |
+| Activity log intact | Hash chain verified on the Security page and in tests | Intact |
+| Backups restorable | Every backup is read back and checked as it's made; restore tested | Verified |
+
 ## Settings
 
 | Setting | Default | What it does |
@@ -151,6 +257,7 @@ Connect an AI assistant).
 | `TEAMPULSE_LLM_MAX_TOKENS` | `1500` | Longest AI reply. |
 | `TEAMPULSE_AUDIT_DAYS` / `TEAMPULSE_CACHE_DAYS` | `180` / `30` | Retention for the activity log and cached AI responses. |
 | `TEAMPULSE_BACKUP_DIR` / `TEAMPULSE_BACKUP_KEEP` | empty / `14` | Daily verified backups from the poll loop. |
+| `TEAMPULSE_BACKUP_KEY` | empty | Encrypt backups (Fernet). Make one with `python -m teampulse.maintenance new-key`. |
 
 ## Tests
 
@@ -170,6 +277,21 @@ Connect an AI assistant).
   message) through the real agents; each is caught, and good answers pass untouched.
 - `tests/test_langsmith_eval.py`: evaluation runs without a LangSmith key make no network calls (LangSmith
   otherwise uploads traces, which contain team chat, even with uploads switched off).
+
+- `tests/test_security.py`:
+  - every action reaches a permission check, and a new unchecked one is caught
+  - signed-out callers are refused everywhere and change nothing
+  - deny by default, and the resource rules
+  - grants: co-lead, the rules, a tampered row, removal on the next request
+  - re-authentication, scoped to one session and throttled
+  - two installs share nothing
+  - the tamper-evident activity log, including truncation and retention
+  - encrypted backups: no plaintext on disk, wrong key, tampering
+  - secrets removed before AI requests
+  - the secret scanner
+  - the Security page
+- CI's `security` job scans every tracked file and the full git history for keys
+  (`python scripts/scan_secrets.py`) and checks authorization coverage.
 
 ## Reporting a problem
 

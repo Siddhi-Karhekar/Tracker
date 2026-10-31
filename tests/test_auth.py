@@ -27,6 +27,7 @@ def team(tmp_path):
     lid = auth._insert_user(conn, "Neha Sharma", "neha", "leader", "Neha", LEADER_PW, False, None)
     mid = auth._insert_user(conn, "Kabir Rao", "kabir", "member", "Kabir", MEMBER_PW, False, lid)
     _, leader = auth.login(conn, "neha", LEADER_PW)
+    auth.confirm_password(conn, leader, LEADER_PW)   # as the leader does before high-impact changes
     _, member = auth.login(conn, "kabir", MEMBER_PW)
     return conn, leader, member, tmp_path
 
@@ -216,9 +217,14 @@ def test_account_rules(team):
         actions.set_active(conn, leader, leader.id, False)
     other_id = auth._insert_user(conn, "Other Leader", "other", "leader", None, LEADER_PW, False, None)
     other = auth.login(conn, "other", LEADER_PW)[1]
+    auth.confirm_password(conn, other, LEADER_PW)
     actions.set_active(conn, leader, other_id, False)          # two active leaders: allowed
+    with pytest.raises(auth.PermissionDenied):                 # a deactivated leader's session is gone, and
+        actions.set_active(conn, other, leader.id, False)      # with it the password confirmation
+    with conn:                                                 # even with a stale confirmation, the team keeps a leader
+        conn.execute("UPDATE sessions SET revoked_at = NULL, reauth_at = ? WHERE user_id = ?", (auth.iso(auth.now()), other_id))
     with pytest.raises(auth.AuthError, match="at least one active leader"):
-        actions.set_active(conn, other, leader.id, False)      # would leave no active leader
+        actions.set_active(conn, other, leader.id, False)
     with pytest.raises(auth.AuthError, match="valid role"):
         actions.create_user(conn, leader, "Role Hacker", role="admin")
     with pytest.raises(auth.AuthError, match="name of 2 to 60"):

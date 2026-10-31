@@ -165,6 +165,7 @@ class EventIndex:
         db_file = conn.execute("PRAGMA database_list").fetchone()[2] or ""
         default = str(Path(db_file).with_suffix("")) + "_chroma" if db_file else None
         path = path or config.get("TEAMPULSE_CHROMA", default)
+        self.path = path   # next to the database: one install's index is never another's
         client = chromadb.PersistentClient(path=path) if path else chromadb.EphemeralClient()
         # One collection per embedding model, so switching models never mixes vectors.
         name = "events_" + re.sub(r"[^a-zA-Z0-9]+", "_", self.embedder.name)[-40:].strip("_")

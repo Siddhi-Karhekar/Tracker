@@ -13,7 +13,8 @@ from tests.test_roles_ui import LEADER_PW, page, team  # noqa: F401  (shared fix
 PAYLOADS = ["<img src=x onerror=alert(1)>", "<script>alert(1)</script>", "<svg onload=alert(1)>"]
 BAD_URL = "javascript:alert(1)"
 POISON = " ".join(PAYLOADS) + " ![x](https://evil.example/track.png)"
-PAGES = ["home", "ask", "blockers", "discrepancies", "tasks", "contributions", "sources", "memory", "label", "team"]
+PAGES = ["home", "ask", "blockers", "discrepancies", "tasks", "contributions", "sources", "memory", "label", "team",
+         "security"]
 
 
 @pytest.fixture()

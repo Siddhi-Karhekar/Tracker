@@ -32,7 +32,7 @@ import secrets
 import sqlite3
 import string
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 from teampulse import config
@@ -55,13 +55,27 @@ PERMISSIONS = {
     "pm.manage": "Create projects and tasks, assign and reassign, edit deadlines, approve requests, mark complete",
     "pm.work": "Update their own tasks (status, progress, subtasks), report blockers, request deadline changes, "
                "comment on any task",
+    "audit.read": "Read the activity log and the Security page",
 }
 MEMBER_PERMISSIONS = {"view", "ask", "contrib.review_own", "pm.work"}
+# What a leader may grant one member on top of that (fine-grained, revocable). Account and security
+# administration (users.manage, settings.manage) is never grantable: there's no path to becoming an admin.
+GRANTABLE = {
+    "pm.manage": "Co-lead: plan, assign, approve and complete tasks; open the Team dashboard",
+    "data.edit": "Fix data: mark conflicts, correct chat links, label chat",
+    "data.refresh": "Refresh data: rebuild tasks, read new chat, compare sources",
+    "memory.write": "Change team memory",
+    "audit.read": "Read the activity log and the Security page",
+}
+NEVER_GRANTABLE = {"users.manage", "settings.manage"}
+# Admin pages a grant opens (pages a member normally can't see).
+PAGE_PERMISSION = {"dashboard": "pm.manage", "label": "data.edit", "security": "audit.read"}
 
 # Pages. Admin-only pages can never be granted to members.
 PAGES = {"home": "Home", "ask": "Ask", "blockers": "Blockers", "conflicts": "Conflicts", "tasks": "Tasks",
          "contributions": "Contributions", "sources": "Data sources", "memory": "Team memory"}
-ADMIN_PAGES = {"label": "Label chat", "team": "Team & access", "dashboard": "Team dashboard"}
+ADMIN_PAGES = {"label": "Label chat", "team": "Team & access", "dashboard": "Team dashboard",
+               "security": "Security"}
 # Every signed-in person always has these; they aren't in the leader's page settings.
 PERSONAL_PAGES = {"workspace": "My work", "board": "Project board"}
 DEFAULT_MEMBER_PAGES = ["home", "ask", "blockers", "conflicts", "tasks", "contributions", "memory"]
@@ -90,6 +104,8 @@ class Actor:
     role: str
     member_name: str | None = None
     must_change: bool = False
+    grants: frozenset = frozenset()     # extra capabilities from user_grants, loaded on every request
+    session: str | None = None          # hash of the session token (None: AI-assistant token, CLI, local mode)
 
     @property
     def is_leader(self) -> bool:
@@ -172,7 +188,70 @@ def audit(conn: sqlite3.Connection, actor: Actor | None, action: str, target: st
         conn.execute("INSERT INTO audit_log (at, actor_id, actor_name, action, target, outcome, detail) "
                      "VALUES (?, ?, ?, ?, ?, ?, ?)",
                      (iso(now()), actor.id if actor else None, actor.display_name if actor else None, action,
-                      target[:200], outcome, detail[:300]))
+                      str(target or "")[:200], outcome, str(detail or "")[:300]))
+    seal_audit(conn)
+
+
+# ---- tamper-evident activity log ---------------------------------------------------------------------------
+# Every entry carries the hash of the one before it, so changing or deleting an entry breaks the chain from there
+# on, and verify_audit() says where. Entries are sealed in id order under SQLite's write lock, so the app, the poller
+# and the bot writing at once can't fork the chain. The newest hash is also kept separately, which catches entries
+# removed from the end. (Someone with full write access to the database file could rebuild the whole chain; keep
+# backups, whose verification records the head hash, to compare against.)
+
+AUDIT_FIELDS = ("at", "actor_id", "actor_name", "action", "target", "outcome", "detail")
+
+
+def _digest(prev: str, row) -> str:
+    payload = json.dumps([prev] + [row[f] for f in AUDIT_FIELDS], ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def seal_audit(conn) -> int:
+    if conn.in_transaction:      # inside someone else's transaction: the next audit() call seals it
+        return 0
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # Continue from the recorded head, not from whatever row is last: if entries were cut off the end, the next
+        # entry then points at a hash that no longer exists, and the gap stays visible.
+        head = conn.execute("SELECT value FROM settings WHERE key = 'audit:head'").fetchone()
+        last = conn.execute("SELECT hash FROM audit_log WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
+        prev = json.loads(head[0])["hash"] if head else (last[0] if last else "genesis")
+        rows = conn.execute(f"SELECT id, {', '.join(AUDIT_FIELDS)} FROM audit_log WHERE hash IS NULL ORDER BY id"
+                            ).fetchall()
+        for r in rows:
+            h = _digest(prev, r)
+            conn.execute("UPDATE audit_log SET prev_hash = ?, hash = ? WHERE id = ?", (prev, h, r["id"]))
+            prev = h
+        if rows:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('audit:head', ?)",
+                         (json.dumps({"id": rows[-1]["id"], "hash": prev}),))
+        conn.commit()
+        return len(rows)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def verify_audit(conn) -> dict:
+    """Recompute the chain. The first entry still kept (older ones may be removed by retention) anchors it."""
+    seal_audit(conn)
+    rows = conn.execute(f"SELECT id, prev_hash, hash, {', '.join(AUDIT_FIELDS)} FROM audit_log ORDER BY id").fetchall()
+    if not rows:
+        return {"ok": True, "checked": 0}
+    prev = rows[0]["prev_hash"]
+    for r in rows:
+        if r["prev_hash"] != prev or _digest(prev, r) != r["hash"]:
+            return {"ok": False, "checked": len(rows), "first_bad_id": r["id"], "at": r["at"],
+                    "reason": "an entry was changed or removed here"}
+        prev = r["hash"]
+    head = conn.execute("SELECT value FROM settings WHERE key = 'audit:head'").fetchone()
+    if head:
+        h = json.loads(head[0])
+        if h["id"] > rows[-1]["id"] or (h["id"] == rows[-1]["id"] and h["hash"] != prev):
+            return {"ok": False, "checked": len(rows), "first_bad_id": rows[-1]["id"], "at": rows[-1]["at"],
+                    "reason": "the newest entries were removed"}
+    return {"ok": True, "checked": len(rows), "since": rows[0]["at"], "head": prev}
 
 
 # ---- accounts --------------------------------------------------------------------------------------
@@ -180,8 +259,15 @@ def audit(conn: sqlite3.Connection, actor: Actor | None, action: str, target: st
 USERNAME_RE = re.compile(r"^[a-z][a-z0-9._-]{2,31}$")
 
 
-def _row_actor(row: sqlite3.Row) -> Actor:
-    return Actor(row["id"], row["username"], row["display_name"], row["role"], row["member_name"], bool(row["must_change"]))
+def _grants(conn, user_id: str) -> frozenset:
+    """Only allowlisted capabilities count, whatever the table says."""
+    return frozenset(r[0] for r in conn.execute("SELECT permission FROM user_grants WHERE user_id = ?", (user_id,))
+                     if r[0] in GRANTABLE)
+
+
+def _row_actor(row: sqlite3.Row, conn=None) -> Actor:
+    return Actor(row["id"], row["username"], row["display_name"], row["role"], row["member_name"],
+                 bool(row["must_change"]), _grants(conn, row["id"]) if conn is not None else frozenset())
 
 
 def suggest_username(conn: sqlite3.Connection, display_name: str) -> str:
@@ -324,7 +410,7 @@ def login(conn, username: str, password: str) -> tuple[str, Actor]:
     with conn:
         conn.execute("DELETE FROM login_throttle WHERE key = ?", (key,))
     token = _issue_session(conn, user["id"])
-    actor = _row_actor(user)
+    actor = replace(_row_actor(user, conn), session=_token_hash(token))
     audit(conn, actor, "auth.login", key)
     return token, actor
 
@@ -349,7 +435,7 @@ def demo_session(conn, username: str) -> tuple[str, Actor]:
     if user is None:
         raise AuthError("The demo accounts aren't set up yet. Reload the page.")
     token = _issue_session(conn, user["id"])
-    actor = _row_actor(user)
+    actor = replace(_row_actor(user, conn), session=_token_hash(token))
     audit(conn, actor, "auth.demo_login", username)
     return token, actor
 
@@ -367,7 +453,46 @@ def resolve(conn, token: str | None) -> Actor | None:
         return None
     with conn:
         conn.execute("UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (iso(stamp), row["token_hash"]))
-    return Actor(row["user_id"], row["username"], row["display_name"], row["role"], row["member_name"], bool(row["must_change"]))
+    return Actor(row["user_id"], row["username"], row["display_name"], row["role"], row["member_name"],
+                 bool(row["must_change"]), _grants(conn, row["user_id"]), row["token_hash"])
+
+
+# ---- re-authentication for high-impact actions ------------------------------------------------------------
+
+REAUTH_MINUTES = 10
+
+
+def confirm_password(conn, actor: Actor, password: str) -> None:
+    """"Confirm it's you": marks this session (only this one) as recently authenticated. Throttled like sign-in."""
+    if actor is None or not actor.session:
+        raise AuthError("Sign in again to do this.")
+    key = _throttle_key(actor.username)
+    _check_lock(conn, key)
+    user = get_user(conn, actor.id)
+    if user is None or not verify_password(password or "", user["password_hash"]):
+        locked = _record_failure(conn, key)
+        audit(conn, actor, "auth.reauth", actor.username, "failed", "locked" if locked else "")
+        raise AuthError("That password isn't right." + (f" Try again in {LOCK_MINUTES} minutes." if locked else ""))
+    with conn:
+        conn.execute("DELETE FROM login_throttle WHERE key = ?", (key,))
+        conn.execute("UPDATE sessions SET reauth_at = ? WHERE token_hash = ?", (iso(now()), actor.session))
+    audit(conn, actor, "auth.reauth", actor.username)
+
+
+def recently_authenticated(conn, actor: Actor | None) -> bool:
+    if actor is not None and actor.id == LOCAL_ADMIN.id:
+        return True        # sign-in switched off (local development only): there's no password to confirm
+    if actor is None or not actor.session:
+        return False
+    row = conn.execute("SELECT reauth_at FROM sessions WHERE token_hash = ? AND revoked_at IS NULL",
+                       (actor.session,)).fetchone()
+    return bool(row and row[0] and row[0] >= iso(now() - timedelta(minutes=REAUTH_MINUTES)))
+
+
+def require_recent_auth(conn, actor: Actor | None, what: str) -> None:
+    if not recently_authenticated(conn, actor):
+        audit(conn, actor, f"reauth.{what}", "", "denied", "no recent password confirmation")
+        raise PermissionDenied(f"For your team's safety, confirm your password first (valid {REAUTH_MINUTES} minutes).")
 
 
 def logout(conn, token: str | None) -> None:
@@ -433,7 +558,7 @@ def resolve_api_token(conn, token: str | None) -> tuple[Actor, str] | None:
     if not row["last_used"] or row["last_used"] < iso(now() - timedelta(minutes=1)):   # at most one write a minute
         with conn:
             conn.execute("UPDATE api_tokens SET last_used = ? WHERE id = ?", (iso(now()), row["token_id"]))
-    return _row_actor(row), row["scope"]
+    return _row_actor(row, conn), row["scope"]
 
 
 def list_api_tokens(conn, actor: Actor, everyone: bool = False) -> list[dict]:
@@ -450,8 +575,8 @@ def revoke_api_token(conn, actor: Actor, token_id: int) -> None:
     row = conn.execute("SELECT user_id, name FROM api_tokens WHERE id = ? AND revoked_at IS NULL", (int(token_id),)).fetchone()
     if row is None:
         return
-    if row["user_id"] != actor.id:
-        require(conn, actor, "users.manage", f"token {token_id}")   # leaders can cut anyone's connection
+    if not authorize(conn, actor, "token.revoke", row["user_id"]):   # your own, or a leader cutting anyone's
+        require(conn, actor, "users.manage", f"token {token_id}")
     with conn:
         conn.execute("UPDATE api_tokens SET revoked_at = ? WHERE id = ?", (iso(now()), int(token_id)))
     audit(conn, actor, "token.revoke", row["name"])
@@ -513,15 +638,47 @@ def public_demo() -> bool:
 
 
 def can(actor: Actor | None, permission: str) -> bool:
-    if actor is None or actor.must_change:
+    """Deny by default: an unknown permission, no account, or an account that must change its password gets nothing."""
+    if actor is None or actor.must_change or permission not in PERMISSIONS:
         return False
     if permission in DEMO_LOCKED and public_demo():
         return False
     if actor.role == "leader":
-        return permission in PERMISSIONS
+        return True
     if permission == "contrib.review_own" and not contrib_review_enabled():
         return False
-    return permission in MEMBER_PERMISSIONS
+    return permission in MEMBER_PERMISSIONS or (permission in actor.grants and permission in GRANTABLE)
+
+
+# Resource rules (ABAC): having a permission isn't enough; it must also be *this* person's resource, unless they
+# manage it. One place for every "is this mine?" decision, so pages, AI agents and MCP tools all agree.
+def _owns_task(conn, actor: Actor, task) -> bool:
+    if can(actor, "pm.manage"):
+        return True
+    mine = (actor.member_name or "").lower()
+    return bool(mine) and mine in {a.lower() for a in task.get("assignees", [])}
+
+
+RESOURCE_RULES = {
+    "pm.work": lambda conn, actor, task: _owns_task(conn, actor, task),
+    "contrib.review_own": lambda conn, actor, member: bool(actor.member_name) and actor.member_name == member,
+    "workspace.read": lambda conn, actor, member: can(actor, "pm.manage") or (
+        bool(actor.member_name) and actor.member_name.lower() == str(member).lower()),
+    "token.revoke": lambda conn, actor, owner_id: owner_id == actor.id or can(actor, "users.manage"),
+}
+# Resource-level permissions that aren't plain capabilities: who may do them is decided by the rule alone.
+DERIVED = {"workspace.read": "view", "token.revoke": "view"}
+
+
+def authorize(conn, actor: Actor | None, permission: str, resource=None) -> bool:
+    """The policy decision point: capability check, then the resource rule if there's a resource. Never raises."""
+    base = DERIVED.get(permission, permission)
+    if not can(actor, base):
+        return False
+    rule = RESOURCE_RULES.get(permission)
+    if resource is not None and rule is not None:
+        return bool(rule(conn, actor, resource))
+    return permission not in DERIVED or resource is not None
 
 
 def require(conn, actor: Actor | None, permission: str, target: str = "") -> Actor:
@@ -550,7 +707,41 @@ def page_allowed(conn, actor: Actor | None, page: str) -> bool:
         return True
     if actor.role == "leader":
         return page in PAGES or page in ADMIN_PAGES
+    if page in PAGE_PERMISSION:              # an admin page a grant opens
+        return can(actor, PAGE_PERMISSION[page])
     return page in member_pages(conn)
+
+
+# ---- capability grants ------------------------------------------------------------------------------------
+
+def list_grants(conn) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for r in conn.execute("SELECT user_id, permission FROM user_grants ORDER BY permission"):
+        if r[1] in GRANTABLE:
+            out.setdefault(r[0], []).append(r[1])
+    return out
+
+
+def set_grant(conn, actor: Actor, user_id: str, permission: str, on: bool) -> None:
+    """Leader only. Members only, allowlisted capabilities only, never to yourself; takes effect on the person's next
+    click or AI-assistant call, because permissions are loaded on every request."""
+    require(conn, actor, "users.manage", f"grant {permission}")
+    require_recent_auth(conn, actor, "grant")
+    if permission not in GRANTABLE or permission in NEVER_GRANTABLE:
+        audit(conn, actor, "grant.set", user_id, "denied", f"not grantable: {permission}")
+        raise PermissionDenied("That can't be granted. Account and security administration stay with team leaders.")
+    if user_id == actor.id:
+        raise PermissionDenied("You can't change your own permissions.")
+    user = get_user(conn, user_id)
+    if user is None or user["role"] != "member" or not user["active"]:
+        raise AuthError("Capabilities can only be granted to active team members.")
+    with conn:
+        if on:
+            conn.execute("INSERT OR IGNORE INTO user_grants (user_id, permission, granted_by, granted_at) "
+                         "VALUES (?, ?, ?, ?)", (user_id, permission, actor.id, iso(now())))
+        else:
+            conn.execute("DELETE FROM user_grants WHERE user_id = ? AND permission = ?", (user_id, permission))
+    audit(conn, actor, "grant.add" if on else "grant.remove", user["username"], detail=permission)
 
 
 # ---- CLI (for whoever runs the server; it has direct database access anyway) -----------------------

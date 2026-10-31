@@ -31,8 +31,33 @@ if locked:
     st.info("Account and access changes are switched off in the public demo, so one visitor can't change them "
             "for everyone else. You can still look around; it all works on your own copy.")
 show_credentials()
-add, people, visibility, assistants, activity = st.tabs(["Add a teammate", "Accounts", "What members can see",
-                                                         "AI assistant connections", "Activity"])
+
+
+def confirm_box():
+    """High-impact changes (reset, deactivate, a new leader, capability grants) need your password from the last
+    few minutes, in this session. A stolen or unattended session alone can't do them."""
+    if locked or not webapp.auth_enabled():
+        return
+    if auth.recently_authenticated(conn, actor):
+        st.caption(f"✓ Password confirmed. Resets, deactivation, new leaders and capability changes are unlocked "
+                   f"for {auth.REAUTH_MINUTES} minutes.")
+        return
+    with st.form("reauth", border=True):
+        st.markdown("**Confirm it's you** to reset passwords, deactivate accounts, create a leader or change "
+                    "capabilities.")
+        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        pw = c1.text_input("Your password", type="password", autocomplete="current-password", max_chars=128)
+        if c2.form_submit_button("Confirm", icon=":material/verified_user:"):
+            try:
+                auth.confirm_password(conn, actor, pw)
+                st.rerun()
+            except auth.AuthError as exc:
+                st.error(str(exc))
+
+
+confirm_box()
+add, people, capabilities, visibility, assistants, activity = st.tabs([
+    "Add a teammate", "Accounts", "Capabilities", "What members can see", "AI assistant connections", "Activity"])
 
 with add:
     members = [r[0] for r in conn.execute("SELECT display_name FROM members ORDER BY display_name")]
@@ -82,6 +107,30 @@ with people:
                 if b2.button(label, key=f"active-{u['id']}", icon=icon, width="stretch", disabled=locked):
                     try:
                         actions.set_active(conn, actor, u["id"], not u["active"])
+                        st.rerun()
+                    except (auth.AuthError, auth.PermissionDenied) as exc:
+                        st.error(str(exc))
+
+with capabilities:
+    st.caption("Give a member one specific extra power on top of their own work, for example a co-lead who plans "
+               "and approves tasks. It takes effect on their next click and can be removed any time. Account and "
+               "security administration stay with team leaders and can't be granted.")
+    grants = auth.list_grants(conn)
+    members_ = [u for u in auth.list_users(conn) if u["role"] == "member" and u["active"]]
+    if not members_:
+        st.caption("No active team members yet.")
+    for u in members_:
+        with st.container(border=True):
+            st.markdown(f"**{ui.e(u['display_name'])}** <span class='tp-meta'>{ui.e(u['username'])}</span>",
+                        unsafe_allow_html=True)
+            have = set(grants.get(u["id"], []))
+            cols = st.columns(len(auth.GRANTABLE))
+            for col, (perm, label) in zip(cols, auth.GRANTABLE.items()):
+                on = col.checkbox(label.split(":")[0], value=perm in have, key=f"grant-{u['id']}-{perm}", help=label,
+                                  disabled=locked)
+                if on != (perm in have):
+                    try:
+                        auth.set_grant(conn, actor, u["id"], perm, on)
                         st.rerun()
                     except (auth.AuthError, auth.PermissionDenied) as exc:
                         st.error(str(exc))

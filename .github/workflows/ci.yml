@@ -42,6 +42,25 @@ jobs:
           --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3813
           --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815
 
+  security:
+    # No API key or token anywhere in the files or the git history, and every action behind a permission check.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0          # the whole history, so an old commit can't hide a key
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Secret scan (files and full history)
+        run: python scripts/scan_secrets.py
+      - name: Authorization coverage
+        run: |
+          pip install -r requirements.lock
+          python -c "from teampulse import security; c = security.authorization_coverage(); print(f\"{c['covered']}/{c['functions']} actions checked\"); raise SystemExit(1 if c['unchecked'] else 0)"
+
   windows:
     # Many students run TeamPulse on Windows; the lock file must install and the tests must pass there too.
     runs-on: windows-latest

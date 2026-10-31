@@ -69,6 +69,7 @@ def Actor_other(conn):   # another member, made on the fly
 def test_reset_deactivation_and_expiry_cut_tokens_off(team):
     from teampulse import actions
     kabir, neha = person(team, "kabir"), person(team, "neha")
+    auth.confirm_password(team, neha, LEADER_PW)
     t1 = auth.create_api_token(team, kabir, "a")
     actions.reset_credentials(team, neha, kabir.id)
     assert auth.resolve_api_token(team, t1) is None

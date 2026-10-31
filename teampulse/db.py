@@ -357,6 +357,16 @@ CREATE TABLE IF NOT EXISTS pm_source_links (
     linked_by     TEXT,
     linked_at     TEXT NOT NULL
 );
+-- Extra capabilities a leader grants to one member (e.g. co-lead planning). Only permissions in auth.GRANTABLE
+-- count; anything else in this table is ignored, so a tampered row can't make someone an admin.
+CREATE TABLE IF NOT EXISTS user_grants (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    permission  TEXT NOT NULL,
+    granted_by  TEXT,
+    granted_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, permission)
+);
+
 -- Personal access tokens for an AI assistant (MCP). Like sessions, only a hash is stored. scope 'read' can only
 -- look; 'write' can also update the person's own tasks. They never give more than the person's own role allows.
 CREATE TABLE IF NOT EXISTS api_tokens (
@@ -506,6 +516,9 @@ MIGRATIONS = [
     ("pm_tasks", "verified_by", "TEXT"),
     ("pm_tasks", "verified_at", "TEXT"),
     ("pm_notifications", "dedupe", "TEXT"),                      # 2.0: one reminder per task per day
+    ("sessions", "reauth_at", "TEXT"),                           # security: password re-confirmed in this session
+    ("audit_log", "prev_hash", "TEXT"),                          # security: tamper-evident chain
+    ("audit_log", "hash", "TEXT"),
 ]
 
 

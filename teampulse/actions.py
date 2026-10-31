@@ -31,6 +31,8 @@ def create_user(conn, actor: Actor, display_name: str, role: str = "member", use
                 member_name: str | None = None) -> tuple[str, str]:
     """Returns (username, one-time password). The password is shown to the leader once and never stored."""
     require(conn, actor, "users.manage", "create user")
+    if role == "leader":                       # a new admin is a high-impact change
+        auth.require_recent_auth(conn, actor, "create_leader")
     username = (username or auth.suggest_username(conn, display_name)).strip().lower()
     auth.validate_new_user(conn, display_name, username, role, member_name)
     password = auth.generate_password()
@@ -49,6 +51,7 @@ def _target(conn, user_id: str):
 def reset_credentials(conn, actor: Actor, user_id: str) -> tuple[str, str]:
     """New one-time password; the user is signed out everywhere and must choose a new password."""
     require(conn, actor, "users.manage", user_id)
+    auth.require_recent_auth(conn, actor, "reset")
     user = _target(conn, user_id)
     password = auth.generate_password()
     with conn:
@@ -61,6 +64,8 @@ def reset_credentials(conn, actor: Actor, user_id: str) -> tuple[str, str]:
 
 def set_active(conn, actor: Actor, user_id: str, active: bool) -> None:
     require(conn, actor, "users.manage", user_id)
+    if not active:
+        auth.require_recent_auth(conn, actor, "deactivate")
     user = _target(conn, user_id)
     if not active:
         if user_id == actor.id:
@@ -185,6 +190,8 @@ def review_own_report(conn, actor: Actor, status: str, note: str = "") -> None:
     require(conn, actor, "contrib.review_own", "own report")
     if not actor.member_name:
         raise AuthError("Your account isn't linked to a team member yet. Ask your team leader to link it.")
+    if not auth.authorize(conn, actor, "contrib.review_own", actor.member_name):   # only ever your own report
+        raise auth.PermissionDenied("You can only review your own report.")
     if status not in ("approved", "disputed"):
         raise AuthError("Unknown choice.")
     from teampulse import contributions
@@ -239,6 +246,8 @@ def ask(conn, actor: Actor, agent, question: str, history: list[dict]) -> dict:
         raise ServiceError("Something went wrong while answering. Please try again; if it keeps happening, tell "
                            "your team leader (the details are in the server log).") from exc
     audit(conn, actor, "ask")   # counted once answered; the question text itself is never logged
+    for g in result.get("guardrails") or []:   # what the output checks caught, for the Security page (no content)
+        audit(conn, actor, f"guardrail.{g.get('guard', 'unknown')}", g.get("agent", ""), "ok", g.get("action", "flag"))
     return result
 
 

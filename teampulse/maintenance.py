@@ -13,10 +13,16 @@ isn't backed up: it is rebuilt from the database automatically.
     python -m teampulse.maintenance backup [--to data/backups]
     python -m teampulse.maintenance verify data/backups/teampulse-20261028-101500.db
     python -m teampulse.maintenance restore data/backups/teampulse-20261028-101500.db --yes   # app stopped
+    python -m teampulse.maintenance new-key        # a key for encrypted backups (TEAMPULSE_BACKUP_KEY)
+
+Encryption: set TEAMPULSE_BACKUP_KEY and backups are written as .db.enc (Fernet: AES with an integrity check).
+The snapshot is taken and checked in memory, so no unencrypted copy is ever written to disk. Keep the key
+somewhere other than the backups; without it they can't be read.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -56,15 +62,69 @@ def _raw(path: str) -> sqlite3.Connection:
     return sqlite3.connect(path, timeout=db.BUSY_SECONDS)
 
 
-def verify(path: str) -> dict:
-    """Open a database file read-only and check it. Raises ValueError if it is damaged."""
-    conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)   # also correct on Windows
+def new_key() -> str:
+    from cryptography.fernet import Fernet
+    return Fernet.generate_key().decode()
+
+
+def _fernet(key: str | None = None):
+    key = key or config.get("TEAMPULSE_BACKUP_KEY")
+    if not key:
+        return None
+    from cryptography.fernet import Fernet
     try:
-        result = conn.execute("PRAGMA integrity_check").fetchone()[0]
-        if result != "ok":
-            raise ValueError(f"{path} failed its integrity check: {result}")
-        tables = {"events", "users", "audit_log"}
-        return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in sorted(tables)}
+        return Fernet(key.encode() if isinstance(key, str) else key)
+    except (ValueError, TypeError):
+        raise ValueError("TEAMPULSE_BACKUP_KEY isn't a valid key. Make one with: python -m teampulse.maintenance "
+                         "new-key") from None
+
+
+def _plain(data: bytes) -> bytes:
+    """A live TeamPulse database is in WAL mode, which only works on disk. Bytes 18-19 of the SQLite header say so;
+    setting them back to the classic rollback-journal format lets the copy open in memory. Nothing else changes."""
+    data = bytearray(data)
+    if data[18:20] == b"\x02\x02":
+        data[18:20] = b"\x01\x01"
+    return bytes(data)
+
+
+def _check(conn, label: str) -> dict:
+    result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    if result != "ok":
+        raise ValueError(f"{label} failed its integrity check: {result}")
+    tables = {"events", "users", "audit_log"}
+    return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in sorted(tables)}
+
+
+def _open_backup(path: str, key: str | None = None) -> sqlite3.Connection:
+    """A backup as an in-memory database (decrypted there if it's a .enc file)."""
+    if str(path).endswith(".enc"):
+        fernet = _fernet(key)
+        if fernet is None:
+            raise ValueError("This backup is encrypted. Set TEAMPULSE_BACKUP_KEY to the key it was made with.")
+        from cryptography.fernet import InvalidToken
+        try:
+            data = fernet.decrypt(Path(path).read_bytes())
+        except InvalidToken:
+            raise ValueError("This backup can't be decrypted: it was made with a different key, or it has been "
+                             "changed or damaged.") from None
+        conn = sqlite3.connect(":memory:")
+        conn.deserialize(_plain(data))
+        return conn
+    disk = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)   # also correct on Windows
+    conn = sqlite3.connect(":memory:")
+    try:
+        disk.backup(conn)
+    finally:
+        disk.close()
+    return conn
+
+
+def verify(path: str, key: str | None = None) -> dict:
+    """Check a backup (plain or encrypted). Raises ValueError if it is damaged or can't be decrypted."""
+    conn = _open_backup(path, key)
+    try:
+        return _check(conn, path)
     finally:
         conn.close()
 
@@ -74,17 +134,34 @@ def backup(db_path: str | None = None, dest: str | None = None, keep: int | None
     folder = Path(dest or config.get("TEAMPULSE_BACKUP_DIR", "data/backups"))
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-    target = folder / f"teampulse-{stamp}.db"
-    source, copy = _raw(db_path), sqlite3.connect(target)
+    fernet = _fernet()
+    source, snapshot = _raw(db_path), sqlite3.connect(":memory:")
     try:
-        source.backup(copy)                  # consistent snapshot, even while others write
+        source.backup(snapshot)              # consistent snapshot, even while others write
+        counts = _check(snapshot, "the snapshot")
+        head = snapshot.execute("SELECT value FROM settings WHERE key = 'audit:head'").fetchone()
+        if fernet is not None:
+            target = folder / f"teampulse-{stamp}.db.enc"
+            target.write_bytes(fernet.encrypt(_plain(snapshot.serialize())))   # never written unencrypted
+        else:
+            target = folder / f"teampulse-{stamp}.db"
+            copy = sqlite3.connect(target)
+            try:
+                snapshot.backup(copy)
+            finally:
+                copy.close()
     finally:
-        copy.close()
+        snapshot.close()
         source.close()
-    verify(str(target))
+    verify(str(target))                      # read it back the way a restore would
     keep = keep if keep is not None else config.get_int("TEAMPULSE_BACKUP_KEEP", 14)
-    for old in sorted(folder.glob("teampulse-*.db"))[:-keep or None]:
+    copies = sorted([*folder.glob("teampulse-*.db"), *folder.glob("teampulse-*.db.enc")], key=lambda p: p.name)
+    for old in copies[:-keep or None]:
         old.unlink()
+    with _raw(db_path) as live:              # for the Security page: when, encrypted or not, and the audit head
+        live.execute("INSERT OR REPLACE INTO sync_state (key, value, updated_at) VALUES ('backup:last', ?, ?)",
+                     (json.dumps({"file": target.name, "encrypted": fernet is not None, "verified": True,
+                                  "counts": counts, "audit_head": head[0] if head else None}), _iso(0)))
     log.info("Backup written to %s", target)
     return target
 
@@ -92,14 +169,17 @@ def backup(db_path: str | None = None, dest: str | None = None, keep: int | None
 def restore(backup_path: str, db_path: str | None = None) -> dict:
     """Replace the live database with a verified backup. Stop the app, bot and pollers first."""
     db_path = db_path or config.DB_PATH
-    counts = verify(backup_path)             # never restore a damaged copy
-    if Path(db_path).exists():
-        backup(db_path, str(Path(db_path).parent / "before-restore"), keep=5)   # undo is one restore away
-    source, target = _raw(backup_path), _raw(db_path)
+    source = _open_backup(backup_path)       # decrypted in memory if needed
     try:
-        source.backup(target)
+        counts = _check(source, backup_path)  # never restore a damaged copy
+        if Path(db_path).exists():
+            backup(db_path, str(Path(db_path).parent / "before-restore"), keep=5)   # undo is one restore away
+        target = _raw(db_path)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
     finally:
-        target.close()
         source.close()
     with _raw(db_path) as conn:              # sessions in a restored copy must not be reusable
         conn.execute("UPDATE sessions SET revoked_at = ? WHERE revoked_at IS NULL", (_iso(0),))
@@ -127,7 +207,11 @@ def main():
     r = sub.add_parser("restore")
     r.add_argument("path")
     r.add_argument("--yes", action="store_true", help="confirm: the app, bot and pollers are stopped")
+    sub.add_parser("new-key", help="print a new key for encrypted backups")
     args = parser.parse_args()
+    if args.command == "new-key":
+        print(f"TEAMPULSE_BACKUP_KEY={new_key()}\nPut this in .env, and keep a copy somewhere other than the backups.")
+        return
     if args.command == "purge":
         print(purge(db.connect()))
     elif args.command == "backup":

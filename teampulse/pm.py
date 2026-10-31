@@ -145,7 +145,8 @@ def can_manage(actor: Actor | None) -> bool:
 
 
 def can_work_on(actor: Actor | None, task: dict) -> bool:
-    return can_manage(actor) or (auth.can(actor, "pm.work") and is_assignee(actor, task))
+    """The central resource rule (auth.RESOURCE_RULES['pm.work']): leaders and co-leads, or an assignee."""
+    return auth.authorize(None, actor, "pm.work", task)
 
 
 def _require_work(conn, actor: Actor, task: dict, what: str) -> None:

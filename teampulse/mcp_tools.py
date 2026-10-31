@@ -48,7 +48,7 @@ def guard(conn, actor: Actor | None, scope: str, tool: str) -> Actor:
 
 def _member(actor: Actor, member: str | None) -> str:
     if member and member.lower() != (actor.member_name or "").lower():
-        if not pm.can_manage(actor):
+        if not auth.authorize(None, actor, "workspace.read", member):
             raise ToolRefused("You can only see your own workspace. Team leaders can see everyone's.")
         return member
     if not actor.member_name and not member:
