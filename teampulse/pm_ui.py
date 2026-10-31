@@ -13,7 +13,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from teampulse import auth, pm, ui
+from teampulse import auth, pm, pm_sync, ui
 from teampulse.auth import Actor
 
 STATUS_TONE = {"backlog": "quiet", "todo": "quiet", "in_progress": "info", "review": "info", "blocked": "bad",
@@ -165,6 +165,8 @@ def task_panel(conn, actor: Actor, task_id: int) -> None:
                 parts.append("Needed by: " + ", ".join(f"#{d['id']} {ui.e(d['title'])}" for d in t["dependents"]))
             st.markdown("<br>".join(parts), unsafe_allow_html=True)
 
+        if not t["parent_id"]:
+            _sources(conn, actor, t, work, manage)
         _subtasks(conn, actor, t, work)
         if manage and t["status"] == "review":
             _review(conn, actor, t)
@@ -185,6 +187,84 @@ def task_panel(conn, actor: Actor, task_id: int) -> None:
                             f"<b>{ui.e(h['actor'] or '')}</b> {ui.e(_history_text(h))}", unsafe_allow_html=True)
 
 
+ROLE_WORD = {"pr": "pull request", "commit": "commit", "review": "review", "comment": "comment", "chat": "chat",
+             "issue": "issue", "notion_task": "Notion page"}
+
+
+def _sources(conn, actor: Actor, t: dict, work: bool, manage: bool) -> None:
+    """What GitHub, Notion and chat say about this task. Shown, compared, never applied by itself."""
+    v = pm_sync.view(conn, t)
+    label = "GitHub & Notion" + (f" ({len(v['differences'])} to check)" if v and not v["missing"] and v["differences"]
+                                 else "" if v else " (not linked)")
+    with st.expander(label, icon=":material/sync_alt:", expanded=bool(v and not v["missing"] and v["differences"])):
+        if v is None:
+            st.caption("Link this task to its GitHub issue or Notion page to see commits, pull requests and chat "
+                       "about it here, and to be told when they disagree with the plan.")
+            if work:
+                _link_picker(conn, actor, t)
+            return
+        if v["missing"]:
+            st.warning(f"The linked item “{v['link']['source_title']}” is no longer in GitHub or Notion. Rebuild "
+                       "source tasks, or link another one.")
+        else:
+            src = v["source"]
+            st.markdown(f"Linked to <a href='{ui.url(src['url'])}' target='_blank' rel='noopener noreferrer'>"
+                        f"{ui.e(src['title'])}</a> <span class='tp-meta'>by {ui.e(v['link']['linked_by'] or '')}</span>",
+                        unsafe_allow_html=True)
+            for d in v["differences"]:
+                st.markdown(ui.row(ui.e(d["text"]), tone="warn"), unsafe_allow_html=True)
+                if manage and d["kind"] == "deadline":
+                    if st.button(f"Use {pm_sync.SOURCES[d['source']]}'s deadline ({d['value']})",
+                                 key=f"use-due-{t['id']}-{d['source']}"):
+                        _do(lambda d=d: pm_sync.use_source_deadline(conn, actor, t["id"], d["source"], t["version"]),
+                            "Deadline updated.")
+            if v["differences"]:
+                st.caption("TeamPulse's plan is the source of truth: these are shown, never applied by themselves.")
+            rows = []
+            for source in pm_sync.SOURCES:
+                cells = [v["card"][a].get(source) for a in ("status", "owner", "deadline")]
+                if any(cells):
+                    rows.append(f"<tr><td>{ui.source_mark(source)}</td><td>{ui.status_pill((cells[0] or {}).get('value'))}"
+                                f"</td><td>{ui.e((cells[1] or {}).get('value') or '—')}</td>"
+                                f"<td>{ui.e(((cells[2] or {}).get('value') or '—')[:10])}</td></tr>")
+            if rows:
+                st.markdown("<table class='tp-strip'><tr><th>Source</th><th>Status</th><th>Owner</th><th>Deadline</th>"
+                            "</tr>" + "".join(rows) + "</table>", unsafe_allow_html=True)
+            counts = ", ".join(f"{n} {ROLE_WORD[r]}{'s' if n != 1 else ''}" for r, n in v["counts"].items()
+                               if n and r in ("pr", "commit", "review", "chat"))
+            who = ", ".join(f"{w} ({n})" for w, n in sorted(v["workers"].items()))
+            st.caption("Evidence: " + (counts or "nothing linked yet") + (f" · work by {who}" if who else "")
+                       + f" · last activity {ui.ago(v['last_activity'])}. Evidence is not verification: the leader "
+                       "verifies progress.")
+            for ev in v["evidence"][:8]:
+                link = (f"<a href='{ui.url(ev['url'])}' target='_blank' rel='noopener noreferrer'>open</a>"
+                        if ev["url"] else "")
+                st.markdown(f"<span class='tp-meta'>{ui.e(ROLE_WORD.get(ev['role'], ev['role']))} · "
+                            f"{ui.e(ev['who'])} · {ui.e(ui.ago(ev['at']))}</span> {ui.e(ev['title'][:100])} {link}",
+                            unsafe_allow_html=True)
+        if work and st.button("Unlink", key=f"unlink-{t['id']}", icon=":material/link_off:"):
+            _do(lambda: pm_sync.unlink(conn, actor, t["id"]), "Unlinked.")
+
+
+def _link_picker(conn, actor: Actor, t: dict) -> None:
+    for s in pm_sync.suggestions(conn, t):
+        if st.button(f"Link to “{s['title']}”" + (f" (#{s['github_number']})" if s["github_number"] else ""),
+                     key=f"suggest-{t['id']}-{s['id']}", icon=":material/link:"):
+            _do(lambda s=s: pm_sync.link(conn, actor, t["id"], s["id"]), "Linked.")
+    taken = {r[0] for r in conn.execute("SELECT source_task FROM pm_source_links")}
+    options = {s["id"]: (f"#{s['github_number']} " if s["github_number"] else "Notion: ") + (s["title"] or s["id"])
+               for s in pm_sync.source_tasks(conn) if s["id"] not in taken}
+    if not options:
+        st.caption("No unlinked GitHub issues or Notion tasks. They appear after the sources are read (Source tasks → "
+                   "Rebuild tasks).")
+        return
+    c1, c2 = st.columns([4, 1])
+    choice = c1.selectbox("Or pick one", [None, *options], format_func=lambda i: "Choose…" if i is None else options[i],
+                          key=f"link-pick-{t['id']}")
+    if c2.button("Link", key=f"link-go-{t['id']}", disabled=choice is None):
+        _do(lambda: pm_sync.link(conn, actor, t["id"], choice), "Linked.")
+
+
 def _history_text(h: dict) -> str:
     field, old, new = h["field"], h["old_value"], h["new_value"]
     if field == "created":
@@ -193,6 +273,8 @@ def _history_text(h: dict) -> str:
         return f"moved it from {pm.STATUS_LABEL.get(old, old)} to {pm.STATUS_LABEL.get(new, new)}"
     if field == "reported_progress":
         return f"set progress {old}% → {new}%"
+    if field == "linked_to":
+        return f"linked it to “{new}”" if new else f"unlinked it from “{old}”"
     if field == "deadline_request":
         return f"asked to move the deadline {old or 'none'} → {new}"
     return f"changed {field.replace('_', ' ')}: {old or '—'} → {new or '—'}"

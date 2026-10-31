@@ -175,4 +175,5 @@ def ago(iso: str | None) -> str:
         return f"{int(seconds // 60)} min ago"
     if seconds < 86400:
         return f"{int(seconds // 3600)} h ago"
-    return f"{int(seconds // 86400)} days ago"
+    days = int(seconds // 86400)
+    return f"{days} day{'s' if days != 1 else ''} ago"

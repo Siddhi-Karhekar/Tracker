@@ -348,6 +348,15 @@ CREATE TABLE IF NOT EXISTS pm_progress_updates (
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pm_progress_task ON pm_progress_updates(task_id, id);
+-- A planned task linked to the GitHub issue / Notion page it corresponds to (an id in `tasks`, which is rebuilt
+-- from the sources). The link only brings evidence and disagreements in; the sources never change a planned task.
+CREATE TABLE IF NOT EXISTS pm_source_links (
+    task_id       INTEGER PRIMARY KEY REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    source_task   TEXT NOT NULL UNIQUE,
+    source_title  TEXT,                  -- kept so the link still makes sense if the source disappears
+    linked_by     TEXT,
+    linked_at     TEXT NOT NULL
+);
 """
 
 EVENT_COLUMNS = [

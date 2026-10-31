@@ -90,6 +90,25 @@ My work. A reminder that was already sent today is never repeated (a unique key 
 
 **Long lists** are shown 15 tasks at a time (8 per board column, 50 rows in the list view).
 
+**GitHub and Notion (phase 3).** A planned task can be linked to the GitHub issue or Notion page it corresponds
+to. TeamPulse suggests the likely match by title. The plan in TeamPulse stays the source of truth: GitHub,
+Notion and chat are evidence, and nothing they say changes a planned task by itself. On a linked task you see:
+
+- what each source says about status, owner and deadline
+- the linked commits, pull requests, reviews and chat messages, who did them and when
+- **where the sources disagree with the plan**, for example "Completed here, but GitHub still says open",
+  "GitHub says done, but here it's In progress", "GitHub has it assigned to Kabir; here it's Aman, Kabir", a
+  different deadline, a linked item that disappeared, or an in-progress task with no linked activity for 7 days
+
+Two changes are possible, both explicit, by the leader, and logged:
+
+- **Use GitHub's (or Notion's) deadline** copies that one deadline into the plan.
+- **Add to project** (Team dashboard → GitHub & Notion) turns GitHub issues and Notion tasks that aren't planned
+  yet into linked planned tasks. Title, owners who are on the team, deadline and status are filled in, and
+  everything can be edited afterwards.
+
+Evidence is not verification: commits don't raise verified progress; only the leader does.
+
 **My work (each member's personal section).** Every member has their own page. It shows:
 
 - counts: open, in progress, overdue, due in 7 days, blocked, completed (and completed this week)
@@ -147,6 +166,9 @@ Checked in `teampulse/pm.py` on every call, before anything is written. Refusals
 | Approve or decline deadline requests | ✅ | ❌ | ❌ |
 | Comment, @mention | ✅ | ✅ | ✅ |
 | Archive a task | ✅ | ❌ | ❌ |
+| Link or unlink a task to a GitHub issue / Notion page | ✅ | ✅ | ❌ |
+| Copy a deadline from GitHub or Notion into the plan | ✅ | ❌ | ❌ |
+| Add GitHub issues / Notion tasks to a project | ✅ | ❌ | ❌ |
 
 New permissions are `pm.manage` (leaders) and `pm.work` (everyone). Accounts not linked to a team member, and
 accounts that still have to choose a password, can't change anything. Each person can make 120 project
@@ -167,6 +189,8 @@ erDiagram
     pm_tasks ||--o{ pm_history : records
     pm_tasks ||--o{ pm_requests : "deadline requests"
     pm_tasks ||--o{ pm_progress_updates : "progress evidence"
+    pm_tasks ||--o| pm_source_links : "linked to"
+    tasks ||--o| pm_source_links : "GitHub issue / Notion page"
     pm_tasks |o--o{ pm_notifications : about
     users }o--|| members : "member_name links"
 ```
@@ -230,7 +254,7 @@ Run it with `TEAMPULSE_E2E=1 python -m pytest tests/e2e`; CI runs it on every pu
 | Phase | Contents |
 |---|---|
 | 2. Views and collaboration | ~~Calendar and timeline views~~, ~~deadline reminders~~, ~~evidence links~~ (done in round 2). Still to do: edit and delete your own comments, email digest of notifications, drag-and-drop board (needs a custom component) |
-| 3. Sync | Link a planned task to a GitHub issue or Notion page. Show the source's status next to TeamPulse's and raise a conflict when they differ. Pre-fill tasks from existing issues. Count linked commits and PRs as evidence in measured progress. |
+| 3. Sync | ~~Link planned tasks to GitHub issues and Notion pages, show what each source says and the evidence, flag disagreements, import unplanned issues~~ (done in round 3). Still to do: webhooks for faster updates (the pollers run every 5 minutes) |
 | 4. AI project manager | Turn a goal or meeting notes into proposed tasks, subtasks and deadlines. Nothing is created until the leader confirms. A task assistant ("what should I do next?", "write an update for my task"). TeamPulse as an MCP server. |
 | 5. Proactive monitoring | Daily check for slipping tasks, overloaded people and stale blockers. It suggests; it never changes a task by itself. Weekly summary for the leader. |
 
@@ -255,6 +279,8 @@ actually contains.
 | Team, TeamMember, ProjectMember | One deployment is one team: `members` and `users.role` cover membership. Every member sees every project. | Partially implemented (by design for one team) |
 | Attachment | Evidence **links** on progress updates. No file uploads: they would need storage and malware checks, and student work already lives in GitHub and Drive. | Partially implemented |
 | Integration entity | Connections are set in `.env` and checked on the Data sources page | Partially implemented |
+| Integrations give evidence and sync, never overwrite assignments | `pm_source_links`; differences shown; deadline copy and import are explicit leader actions | Fully implemented |
+| Webhooks and scheduled sync | Scheduled polling every 5 minutes; no webhooks (they need a public server) | Partially implemented |
 | Separate status, self-reported progress, verified progress, review status | `status` (with Under review), `reported_progress`, `verified_progress` | Fully implemented |
 | Completion not an average of percentages | Completion by size, explained on the page | Fully implemented |
 | Selective MCP gateway with read and write tools | Assessed in section 2; deferred to phase 4 | Not implemented |
@@ -325,3 +351,54 @@ local Ollama). **Needs paid infrastructure:** nothing. Everything runs on free t
 **Remaining:** the rest of phase 2 (edit and delete own comments, email digest), then phase 3 (GitHub/Notion
 links for planned tasks), phase 4 (AI project manager with confirmation, MCP server) and phase 5 (proactive
 monitoring).
+
+## 10. Round 3 report (phase 3: GitHub and Notion)
+
+**Features completed:**
+
+- link and unlink a planned task to its GitHub issue or Notion page, with title-based suggestions
+- the task panel shows status, owner and deadline per source, plus linked commits, PRs, reviews and chat with
+  who and when
+- disagreements with the plan in both directions (status, owner, deadline), missing linked items, and quiet
+  in-progress tasks
+- the leader can copy a source's deadline into the plan
+- the leader can import unplanned issues as linked tasks
+- the Team dashboard has a GitHub & Notion tab
+- the demo has six planned tasks linked to their issues
+- "1 day ago" instead of "1 days ago" everywhere
+
+**Files created:** `teampulse/pm_sync.py`, `tests/test_pm_sync.py`.
+
+**Files modified:**
+
+- `teampulse/db.py`, `teampulse/pm_ui.py`, `teampulse/ui.py`, `teampulse/seed_demo.py`
+- `views/dashboard.py`
+- `README.md`, this document
+
+**Database changes:** new table `pm_source_links` (one source item per planned task, and one planned task per
+source item).
+
+**Tests executed:**
+
+- `python -m pytest -q`: **242 passed**, 1 skipped (the browser test)
+- `TEAMPULSE_E2E=1 python -m pytest tests/e2e`: **1 passed**
+- `ruff`: clean
+
+The 9 new tests check:
+
+- looking changes nothing
+- disagreements in both directions
+- who may link
+- that copying a deadline is a leader's logged edit
+- import, including importing twice
+- a missing source
+- both roles through the pages
+- hostile source titles and links
+
+**Known issues:**
+
+- Owner comparison needs each GitHub login or Notion user to be mapped to a team member (Data sources page).
+  Otherwise the raw login is compared and shows as a difference.
+- A planned task links to one source item. The issue's Notion page is reached through it, because TeamPulse
+  already pairs issues with Notion pages.
+- Disagreements are computed when a page opens, not stored, so there's no history of when they appeared.

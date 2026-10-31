@@ -275,12 +275,12 @@ def seed(path: str) -> tuple[int, Path]:
 def seed_projects(conn) -> None:
     """TeamPulse 2.0 demo plan: one project the team runs inside TeamPulse, matching the story in the chat data
     (OTP mails in spam, Kabir waiting for canteen data, Riya's order history in review)."""
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     from teampulse import pm
 
     neha = auth_actor("Neha")
-    on = date.today()
+    on = NOW.date()   # the same clock as the GitHub/Notion demo data, so dates agree
     d = lambda days: (on + timedelta(days=days)).isoformat()   # noqa: E731
     pid = pm.create_project(conn, neha, "CampusEats MVP", "Canteen ordering app for our final-year project.",
                             d(-21), d(18))
@@ -289,7 +289,7 @@ def seed_projects(conn) -> None:
     t = lambda title, who, **kw: pm.create_task(conn, neha, pid, title, assign_to=who, **kw)   # noqa: E731
     login = t("Login with college email OTP", ["Aman"], priority="high", due=d(-3), start=d(-16), milestone_id=m_beta,
               description="College email domain + 6-digit OTP.", estimate_hours=10, weight=3)
-    menu = t("Menu API", ["Aman"], priority="high", due=d(-2), start=d(-14), milestone_id=m_beta, estimate_hours=12, weight=3)
+    menu = t("Menu API", ["Aman"], priority="high", due=d(-3), start=d(-14), milestone_id=m_beta, estimate_hours=12, weight=3)
     payment = t("Payment integration (Razorpay test mode)", ["Kabir", "Aman"], priority="urgent", due=d(2), start=d(-6),
                 milestone_id=m_beta, depends_on=[menu], estimate_hours=16, weight=5,
                 description="Checkout page + webhook. Test mode only.")
@@ -346,7 +346,19 @@ def seed_projects(conn) -> None:
     pm.set_status(conn, riya, history, "review", note="List view done; filters next week.")
     pm.set_status(conn, neha, report, "in_progress")
     pm.set_progress(conn, neha, report, 35)
-    del deploy
+    # Phase 3: planned tasks linked to their GitHub issue / Notion page. Stored directly because the source task
+    # registry is built after seeding (webapp / Rebuild tasks); ids are stable. "Usability test", "Demo video" and
+    # "Share the API docs" exist only in TeamPulse.
+    links = {login: ("task:campuseats/app#12", "Login with college email OTP"),
+             menu: ("task:campuseats/app#14", "Menu API"),
+             payment: ("task:campuseats/app#16", "Payment integration (Razorpay test mode)"),
+             recs: ("task:campuseats/app#18", "Food recommendation model"),
+             history: ("task:campuseats/app#20", "Order history screen"),
+             deploy: ("task:campuseats/app#22", "Deploy on Render")}
+    with conn:
+        conn.executemany("INSERT INTO pm_source_links (task_id, source_task, source_title, linked_by, linked_at) "
+                         "VALUES (?, ?, ?, 'Neha', ?)", [(tid, sid, title, ago(1)) for tid, (sid, title) in links.items()])
+    del report
 
 
 def auth_actor(name: str):

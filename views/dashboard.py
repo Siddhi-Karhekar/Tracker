@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import pm, pm_ui, ui
+from teampulse import pm, pm_sync, pm_ui, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("dashboard")
@@ -27,8 +27,10 @@ for col, (label, value) in zip(cols, [("Tasks", d["total"]), ("Completed", f"{d[
 
 pm_ui.open_task_panel(conn, actor)
 
-decide, risk, people, plan = st.tabs([f"Needs your decision ({len(d['review']) + len(d['requests'])})",
-                                      f"At risk ({len(d['at_risk'])})", "Workload", "Milestones & activity"])
+sync = pm_sync.overview(conn, project_id or None)
+decide, risk, sources, people, plan = st.tabs([
+    f"Needs your decision ({len(d['review']) + len(d['requests'])})", f"At risk ({len(d['at_risk'])})",
+    f"GitHub & Notion ({len(sync['disagree'])})", "Workload", "Milestones & activity"])
 with decide:
     if not (d["review"] or d["requests"]):
         ui.empty("Nothing waiting.", "Finished work and deadline requests appear here.")
@@ -47,6 +49,40 @@ with risk:
     if not d["at_risk"]:
         ui.empty("Nothing looks at risk.", "Overdue, blocked, nearly-due and unassigned tasks appear here.")
     pm_ui.task_list(d["at_risk"], "risk")
+with sources:
+    st.caption(f"{sync['linked']} planned task{'s' if sync['linked'] != 1 else ''} linked to GitHub or Notion. The plan "
+               "here is the source of truth; GitHub, Notion and chat are evidence. Nothing is changed by itself.")
+    if sync["disagree"]:
+        st.subheader("Where the sources disagree with the plan")
+        for item in sync["disagree"]:
+            t = item["task"]
+            st.markdown(ui.row(f"#{t['id']} {ui.e(t['title'])}",
+                               "<br>".join(ui.e(x["text"]) for x in item["differences"]), "warn"),
+                        unsafe_allow_html=True)
+            if st.button(f"Open #{t['id']}", key=f"sync-open-{t['id']}", type="tertiary"):
+                st.session_state[pm_ui.OPEN_KEY] = t["id"]
+                st.rerun()
+    elif sync["linked"]:
+        ui.empty("Everything agrees.", "Linked tasks match what GitHub and Notion say.")
+    st.subheader("In GitHub or Notion but not planned here")
+    if not sync["unplanned"]:
+        st.caption("Every GitHub issue and Notion task is planned here (or there are none yet: Source tasks → "
+                   "Rebuild tasks reads them).")
+    elif project_id:
+        labels = {s["id"]: (f"#{s['github_number']} " if s["github_number"] else "Notion: ") + (s["title"] or s["id"])
+                  for s in sync["unplanned"]}
+        picked = st.multiselect("Add to this project", list(labels), format_func=labels.get, key="import-pick")
+        st.caption("Each becomes a planned task, linked, with its title, owners who are on the team, deadline and "
+                   "status filled in from GitHub and Notion. You can edit everything afterwards.")
+        if st.button("Add to project", disabled=not picked, icon=":material/playlist_add:"):
+            pm_ui._do(lambda: pm_sync.import_tasks(conn, actor, project_id, picked),
+                      f"Added {len(picked)} task{'s' if len(picked) != 1 else ''}.")
+    else:
+        for s_ in sync["unplanned"]:
+            st.markdown(ui.row(ui.e(s_["title"] or s_["id"]), meta=f"<a href='{ui.url(s_['url'])}' target='_blank' "
+                                                                  "rel='noopener noreferrer'>open</a>"),
+                        unsafe_allow_html=True)
+        st.caption("Choose a project in the sidebar to add these to it.")
 with people:
     st.caption("Open work per person, in alphabetical order. It shows who may be overloaded; it is not a ranking "
                "and says nothing about effort. The Contributions page has the evidence-based picture.")

@@ -59,6 +59,9 @@ in Hinglish. The three drift apart, and nobody has time to cross-check them. Tea
 - Members update their own tasks, report blockers, ask for a new deadline and comment. The leader plans,
   assigns, verifies progress and marks work Completed. **Self-reported progress** (with evidence links) is kept
   separate from **verified progress**, which only the leader sets. Completion % counts finished work by size.
+- **Linked to GitHub and Notion**: each planned task shows its issue's commits, PRs and chat, and TeamPulse
+  says where GitHub or Notion disagree with the plan ("Completed here, but GitHub still says open"). The plan
+  is the source of truth; nothing changes by itself. Issues that aren't planned yet can be added in one click.
   Design, permission matrix and roadmap: [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
 
 **Also included**
@@ -406,7 +409,7 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **233 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **242 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
 regression test for every bug found by real AI runs, and project management (permissions per role and per
 assignee, workflow rules, two people editing at once, both roles through the pages). A Playwright test runs the
@@ -598,6 +601,7 @@ teampulse/
   agents/                   supervisor, retrieval, blockers, discrepancy, contributions, baseline (plain RAG)
   auth.py, actions.py       accounts, sessions, roles; the only write path (server-side checks)
   pm.py, pm_ui.py           project management: rules and permission checks; task cards and task panel
+  pm_sync.py                planned tasks ↔ GitHub issues / Notion pages: evidence, disagreements, import
   ui.py, webapp.py          design system, shared page helpers, public demo mode
   health.py                 connection checks and process status
   maintenance.py            retention purge, verified backup and restore
@@ -608,7 +612,7 @@ teampulse/
 eval_data/                  18 golden questions (with reference answers), 60 Hinglish messages,
                             agent cases, thresholds
 docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
-tests/                      233 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
+tests/                      242 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment
