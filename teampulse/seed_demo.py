@@ -360,6 +360,15 @@ def seed_projects(conn) -> None:
                          "VALUES (?, ?, ?, 'Neha', ?)", [(tid, sid, title, ago(1)) for tid, (sid, title) in links.items()])
     del report
 
+    # Phase 4: a proposal from yesterday's meeting notes, waiting for Neha to confirm (made by the rules, so the
+    # demo needs no AI key). Nothing in it is a task until she ticks items and presses Create.
+    from teampulse import pm_ai
+    pm_ai.propose_plan(conn, neha, pid, "Meeting notes, hostel 3 beta\n"
+                       "- Riya: design the feedback form by " + d(8) + "\n"
+                       "- Aman will set up error logging (urgent)\n"
+                       "- Kabir — canteen data cleaning, Friday tak\n"
+                       "- Write the demo script", on=on)
+
 
 def auth_actor(name: str):
     """A stand-in signed-in person for seeding (leaders: Neha; everyone else a member)."""

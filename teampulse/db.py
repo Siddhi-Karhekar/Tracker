@@ -357,6 +357,22 @@ CREATE TABLE IF NOT EXISTS pm_source_links (
     linked_by     TEXT,
     linked_at     TEXT NOT NULL
 );
+-- Phase 4: what the AI proposed, kept until a person accepts or discards it. Nothing in here is a task until a
+-- leader confirms it; then the created task ids are recorded.
+CREATE TABLE IF NOT EXISTS pm_ai_drafts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind         TEXT NOT NULL CHECK (kind IN ('plan', 'summary')),
+    project_id   INTEGER REFERENCES pm_projects(id) ON DELETE CASCADE,
+    created_by   TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    input        TEXT NOT NULL DEFAULT '',
+    output       TEXT NOT NULL,            -- JSON: proposed items (plan) or {text, facts} (summary)
+    method       TEXT NOT NULL,            -- the AI provider, or 'rules' when no AI answered
+    status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'discarded')),
+    decided_by   TEXT,
+    decided_at   TEXT,
+    created_ids  TEXT
+);
 """
 
 EVENT_COLUMNS = [

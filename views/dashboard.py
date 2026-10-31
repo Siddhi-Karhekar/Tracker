@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import pm, pm_sync, pm_ui, ui
+from teampulse import pm, pm_ai, pm_sync, pm_ui, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("dashboard")
@@ -28,9 +28,9 @@ for col, (label, value) in zip(cols, [("Tasks", d["total"]), ("Completed", f"{d[
 pm_ui.open_task_panel(conn, actor)
 
 sync = pm_sync.overview(conn, project_id or None)
-decide, risk, sources, people, plan = st.tabs([
+decide, risk, sources, weekly, people, plan = st.tabs([
     f"Needs your decision ({len(d['review']) + len(d['requests'])})", f"At risk ({len(d['at_risk'])})",
-    f"GitHub & Notion ({len(sync['disagree'])})", "Workload", "Milestones & activity"])
+    f"GitHub & Notion ({len(sync['disagree'])})", "Weekly summary", "Workload", "Milestones & activity"])
 with decide:
     if not (d["review"] or d["requests"]):
         ui.empty("Nothing waiting.", "Finished work and deadline requests appear here.")
@@ -83,6 +83,27 @@ with sources:
                                                                   "rel='noopener noreferrer'>open</a>"),
                         unsafe_allow_html=True)
         st.caption("Choose a project in the sidebar to add these to it.")
+with weekly:
+    if not project_id:
+        st.caption("Choose a project in the sidebar to write its weekly summary.")
+    else:
+        st.caption("Written from this week's facts only (completed work, risks, reviews, requests, milestones); every "
+                   "statement cites its task. If the AI judges people or mentions anything not in the facts, the "
+                   "rule-based summary is used instead. Nothing is sent anywhere.")
+        if st.button("Write this week's summary", icon=":material/summarize:"):
+            pm_ui._do(lambda: pm_ai.weekly_summary(conn, actor, project_id, get_agent().llm), "Summary written.")
+        latest = pm_ai.latest_summary(conn, project_id)
+        if latest:
+            how = "the rules (no AI answered)" if latest["method"] == "rules" else f"AI ({latest['method']})"
+            st.markdown(f"<span class='tp-meta'>Written {ui.e(ui.ago(latest['created_at']))} by "
+                        f"{ui.e(how)} for {ui.e(latest['created_by'])}</span>", unsafe_allow_html=True)
+            for note in latest.get("notes") or []:
+                st.info(note)
+            with st.container(border=True):
+                st.markdown(ui.md_safe(latest["text"]))
+            with st.expander(f"The facts it was written from ({len(latest['facts'])})"):
+                for f in latest["facts"]:
+                    st.markdown("- " + ui.md_text(f))
 with people:
     st.caption("Open work per person, in alphabetical order. It shows who may be overloaded; it is not a ranking "
                "and says nothing about effort. The Contributions page has the evidence-based picture.")

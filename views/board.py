@@ -66,6 +66,9 @@ if manage:
             if st.form_submit_button("Add milestone"):
                 pm_ui._do(lambda: pm.add_milestone(conn, actor, project_id, mtitle, mdue), "Milestone added.")
 
+if manage:
+    pm_ui.ai_planner(conn, actor, project_id, get_agent().llm)
+
 pm_ui.open_task_panel(conn, actor)
 
 shown = everything

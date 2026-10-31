@@ -1,7 +1,7 @@
 """My work: each person's own workspace. Leaders can open anyone's; members see only their own."""
 import streamlit as st
 
-from teampulse import pm, pm_ui, ui
+from teampulse import pm, pm_ai, pm_ui, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("workspace")
@@ -61,6 +61,14 @@ pm_ui.open_task_panel(conn, actor)
 s = w["sections"]
 focus, everything, month, requests = st.tabs(["Focus", "All tasks", "Calendar", "Requests"])
 with focus:
+    steps = pm_ai.next_steps(conn, member)
+    if steps:
+        st.subheader("Do next")
+        st.caption("Sorted from the facts: blocked first, then late, then due soon, then work others wait for.")
+        for n, step in enumerate(steps, 1):
+            t = step["task"]
+            st.markdown(ui.row(f"{n}. #{t['id']} {ui.e(t['title'])}", ui.e(step["why"]), pm_ui.tone(t)),
+                        unsafe_allow_html=True)
     if not (s["overdue"] or s["due_soon"] or s["blocked"] or s["high_priority"]):
         ui.empty("Nothing urgent.", "No overdue, blocked or high-priority work, and nothing due in the next 7 days.")
     for key, title in (("overdue", "Overdue"), ("blocked", "Blocked"), ("due_soon", "Due in the next 7 days"),

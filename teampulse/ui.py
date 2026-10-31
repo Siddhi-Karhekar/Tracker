@@ -166,7 +166,9 @@ def ago(iso: str | None) -> str:
     if not iso:
         return "never"
     try:
-        seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds()
+        then = datetime.fromisoformat(iso)
+        then = then if then.tzinfo else then.replace(tzinfo=timezone.utc)   # a date or naive time: read as UTC
+        seconds = (datetime.now(timezone.utc) - then).total_seconds()
     except ValueError:
         return iso[:16]
     if seconds < 90:

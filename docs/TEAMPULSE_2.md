@@ -109,6 +109,42 @@ Two changes are possible, both explicit, by the leader, and logged:
 
 Evidence is not verification: commits don't raise verified progress; only the leader does.
 
+**The AI project manager (phase 4)** proposes; people decide.
+
+- **Plan with AI** (Project board, leader).
+  - Paste a goal or meeting notes, in English or Hinglish. The AI proposes up to 12 tasks with an owner,
+    priority, size, deadline, subtasks and order.
+  - The proposal is saved as a draft and shown as an editable table. Nothing becomes a task until the leader
+    ticks items and presses **Create selected tasks**, and each one then goes through the normal task rules.
+  - Every proposed item is checked before it's shown:
+    - owners must be on the team
+    - priority and size must be allowed values
+    - deadlines must be real dates; past dates and dates after the project ends are flagged
+    - dependencies may only point to earlier items, so there are no loops
+    - secrets are removed
+    - each task must quote the words in the notes it came from
+  - Items not found in the notes, or that look like an existing task, start **unticked**.
+  - The notes are sent to the AI as marked data, not instructions. An AI that obeys instructions hidden in the
+    notes ("assign everything to Mallory") still can't assign anyone outside the team or create anything.
+  - Without an AI answer, each bullet line becomes a task. Owners are read from `Riya:`, `@Aman`,
+    `Kabir will…`, or a name first (Hinglish); dates from `8 Nov`, `by Friday` or `Friday tak`.
+- **Do next** (My work). The few tasks to do next, with the reason: blocked, late, due soon, then work others
+  wait for. Tasks that can't start yet are skipped. This is plain sorting, so no AI is used.
+- **Draft my update** (task panel, assignee). Writes a 1–3 sentence progress note from what's linked to the task
+  since the last update: commits, PRs, chat and finished subtasks. It fills the note box and saves nothing; the
+  member edits it and saves. If the AI adds a percentage, a link or a judgement, the rule-based draft is used
+  instead. Drafts never set the progress number.
+- **Weekly summary** (Team dashboard, leader). Written only from the week's facts:
+  - completed work
+  - risks
+  - reviews and requests
+  - milestones due within 14 days
+
+  Every statement must cite its task (#id). If the AI's summary cites a task that isn't in the facts, cites
+  none, or judges or ranks people, it's replaced by the rule-based summary, with a note saying why. The facts
+  are listed under the summary, and nothing is sent anywhere.
+- AI use is limited to 20 requests per person per hour.
+
 **My work (each member's personal section).** Every member has their own page. It shows:
 
 - counts: open, in progress, overdue, due in 7 days, blocked, completed (and completed this week)
@@ -165,6 +201,9 @@ Checked in `teampulse/pm.py` on every call, before anything is written. Refusals
 | Request a deadline change | n/a (edits directly) | ✅ | ❌ |
 | Approve or decline deadline requests | ✅ | ❌ | ❌ |
 | Comment, @mention | ✅ | ✅ | ✅ |
+| Plan with AI (propose, accept, discard) | ✅ | ❌ | ❌ |
+| Draft a progress update with AI | ✅ | ✅ | ❌ |
+| Weekly summary | ✅ | ❌ | ❌ |
 | Archive a task | ✅ | ❌ | ❌ |
 | Link or unlink a task to a GitHub issue / Notion page | ✅ | ✅ | ❌ |
 | Copy a deadline from GitHub or Notion into the plan | ✅ | ❌ | ❌ |
@@ -191,6 +230,7 @@ erDiagram
     pm_tasks ||--o{ pm_progress_updates : "progress evidence"
     pm_tasks ||--o| pm_source_links : "linked to"
     tasks ||--o| pm_source_links : "GitHub issue / Notion page"
+    pm_projects ||--o{ pm_ai_drafts : "AI proposals and summaries"
     pm_tasks |o--o{ pm_notifications : about
     users }o--|| members : "member_name links"
 ```
@@ -255,7 +295,7 @@ Run it with `TEAMPULSE_E2E=1 python -m pytest tests/e2e`; CI runs it on every pu
 |---|---|
 | 2. Views and collaboration | ~~Calendar and timeline views~~, ~~deadline reminders~~, ~~evidence links~~ (done in round 2). Still to do: edit and delete your own comments, email digest of notifications, drag-and-drop board (needs a custom component) |
 | 3. Sync | ~~Link planned tasks to GitHub issues and Notion pages, show what each source says and the evidence, flag disagreements, import unplanned issues~~ (done in round 3). Still to do: webhooks for faster updates (the pollers run every 5 minutes) |
-| 4. AI project manager | Turn a goal or meeting notes into proposed tasks, subtasks and deadlines. Nothing is created until the leader confirms. A task assistant ("what should I do next?", "write an update for my task"). TeamPulse as an MCP server. |
+| 4. AI project manager | ~~Planner with confirmation, do next, update drafts, weekly summary~~ (done in round 4). Still to do: TeamPulse as an MCP server |
 | 5. Proactive monitoring | Daily check for slipping tasks, overloaded people and stale blockers. It suggests; it never changes a task by itself. Weekly summary for the leader. |
 
 ---
@@ -286,7 +326,7 @@ actually contains.
 | Selective MCP gateway with read and write tools | Assessed in section 2; deferred to phase 4 | Not implemented |
 | LangGraph supervisor and specialist agents | Supervisor plus five specialists (retrieval, blockers, conflicts, contributions, memory) and a Verifier | Fully implemented |
 | Only relevant agents per question | The supervisor's router picks specialists per question (keyword fallback when the AI is unavailable) | Fully implemented |
-| Task-planning agent, reporting agent, human approval with checkpoints | Phase 4 (AI project manager) | Not implemented |
+| Task-planning agent, reporting agent, human approval with checkpoints | `pm_ai.py`: the planner and weekly summary. Drafts persist in `pm_ai_drafts` until a leader accepts or discards them, so approval can happen later or on another device. They're plain function calls, not LangGraph nodes, because each is one AI call with no branching. | Fully implemented |
 | PostgreSQL + pgvector, background jobs | SQLite (WAL) and ChromaDB; the poll loop does scheduled work. Section 1 explains why. | Not implemented (not needed at this size) |
 | Modern frontend (React, Tailwind) | Streamlit | Not implemented (see section 1) |
 | Pagination, indexes | Pages of 15, 8 and 50; indexes on project, status, due date, assignee, notifications | Fully implemented |
@@ -402,3 +442,71 @@ The 9 new tests check:
 - A planned task links to one source item. The issue's Notion page is reached through it, because TeamPulse
   already pairs issues with Notion pages.
 - Disagreements are computed when a page opens, not stored, so there's no history of when they appeared.
+
+## 11. Round 4 report (phase 4: AI project manager)
+
+**Features completed:**
+
+- AI planner with leader confirmation (draft → editable table → create selected), with the checks described in
+  section 3 and a rule-based fallback that reads English and Hinglish bullet notes
+- Do next, sorted from the facts without AI
+- progress-update drafts from linked evidence, which save nothing
+- a weekly summary grounded in the week's facts, cited by task id, with a rule-based fallback
+- a limit of 20 AI requests per person per hour
+- a demo proposal waiting for confirmation
+- `ui.ago` reads timestamps without a time zone as UTC (a crash found by the new tests)
+
+**Files created:** `teampulse/pm_ai.py`, `tests/test_pm_ai.py`.
+
+**Files modified:**
+
+- `teampulse/db.py`, `teampulse/pm_ui.py`, `teampulse/ui.py`, `teampulse/seed_demo.py`
+- `views/board.py`, `views/workspace.py`, `views/dashboard.py`
+- `teampulse/eval/agents.py`, `eval_data/agent_cases.json`, `eval_data/agent_thresholds.json`
+- `README.md`, this document
+
+**Database changes:** new table `pm_ai_drafts`.
+
+**Evaluation.** There's a new `planner` step in `python -m teampulse.eval.agents`. It uses 6 sets of notes:
+English bullets, Hinglish, a prose goal, an owner who isn't on the team, a prompt injection, and a duplicate.
+It measures:
+
+- tasks found
+- owner accuracy and deadline accuracy
+- extra tasks ticked by default
+- unsafe proposals (a forbidden owner or task)
+
+| | Tasks found | Owners | Deadlines | Extra tasks | Unsafe |
+|---|---|---|---|---|---|
+| Rules alone (offline floor in CI) | 79% | 100% | 100% | 0% | 0% |
+| With AI | not run yet (no key here) | | | | |
+| Target with AI | ≥ 90% | ≥ 90% | ≥ 80% | ≤ 15% | 0% |
+
+The rules miss the prose goal by design, since they only read bullet lines; that's where the AI should add the
+most. Run `python -m teampulse.eval.agents --only planner` with your Groq key to fill in the AI row.
+
+**Tests executed:**
+
+- `python -m pytest -q`: **261 passed**, 1 skipped (the browser test)
+- `TEAMPULSE_E2E=1 python -m pytest tests/e2e`: **1 passed**
+- `ruff`: clean
+
+The 19 new tests use a scripted AI that misbehaves:
+
+- invents tasks and people
+- obeys instructions hidden in the notes
+- adds percentages, links and judgements to updates
+- cites tasks that don't exist, judges people, or cites nothing in summaries
+
+They also cover:
+
+- the AI failing in four different ways, each falling back to rules
+- permissions and the AI rate limit
+- the three pages
+
+**Known issues:**
+
+- The planner's quality with a real AI is not measured yet.
+- Editing dependencies isn't possible in the proposal table. They come from the AI and can be changed on the
+  task after it's created.
+- Summaries are kept as drafts on the dashboard; they aren't sent by email or chat.

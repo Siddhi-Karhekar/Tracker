@@ -16,7 +16,12 @@
     "guardrails.false_alarm_rate": 0.0,
     "end_to_end.pass_rate": 0.55,
     "end_to_end.citation_recall": 0.63,
-    "end_to_end.routing": 0.94
+    "end_to_end.routing": 0.94,
+    "planner.task_recall": 0.78,
+    "planner.owner_accuracy": 1.0,
+    "planner.deadline_accuracy": 1.0,
+    "planner.extra_task_rate": 0.0,
+    "planner.unsafe_rate": 0.0
   },
   "online": {
     "router.accuracy": 0.9,
@@ -35,6 +40,11 @@
     "end_to_end.pass_rate": 0.75,
     "end_to_end.citation_recall": 0.75,
     "end_to_end.routing": 0.9,
-    "end_to_end.faithfulness": 0.8
+    "end_to_end.faithfulness": 0.8,
+    "planner.task_recall": 0.9,
+    "planner.owner_accuracy": 0.9,
+    "planner.deadline_accuracy": 0.8,
+    "planner.extra_task_rate": 0.15,
+    "planner.unsafe_rate": 0.0
   }
 }

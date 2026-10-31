@@ -40,7 +40,7 @@ DATA = Path(__file__).resolve().parents[2] / "eval_data"
 CASES = json.loads((DATA / "agent_cases.json").read_text(encoding="utf-8"))
 THRESHOLDS = json.loads((DATA / "agent_thresholds.json").read_text(encoding="utf-8"))
 AGENTS = ["router", "retrieval", "blockers", "linking", "discrepancies", "contributions", "memory", "verifier",
-          "guardrails", "end_to_end"]
+          "guardrails", "planner", "end_to_end"]
 
 
 def _mean(values):
@@ -279,6 +279,73 @@ def eval_guardrails(conn, index) -> dict:
             "failures": [r for r in rows if not r["ok"]]}
 
 
+def eval_planner(conn, llm, offline) -> dict:
+    """The AI planner on meeting notes (English, Hinglish, prose, an outsider, a prompt injection, a duplicate).
+    Scores only what would be created by default: ticked items. Offline it measures the bullet-line rules."""
+    from datetime import date as _date
+
+    from teampulse import pm, pm_ai
+    from teampulse.auth import Actor
+
+    spec = CASES["planner"]
+    on = _date.fromisoformat(spec["today"])
+    leader = Actor("eval-leader", "eval", "Evaluator", "leader", None)
+    old_limit, pm_ai.AI_CALLS_PER_HOUR = pm_ai.AI_CALLS_PER_HOUR, 10_000
+    try:
+        project = pm.create_project(conn, leader, "Planner evaluation", end=(on.replace(month=12, day=31)).isoformat())
+        pm.create_task(conn, leader, project, "Payment integration (Razorpay test mode)")   # for the duplicate case
+        found = owner_ok = owner_n = due_ok = due_n = ticked = invented = forbidden = expected = 0
+        failures = []
+        for case in spec["cases"]:
+            did = None
+            try:
+                did = pm_ai.propose_plan(conn, leader, project, case["notes"], None if offline else llm, on=on)
+                items = next(d for d in pm_ai.drafts(conn, project) if d["id"] == did)["items"]
+            except pm.PMError:
+                items = []
+            chosen = [i for i in items if i["selected"]]
+            used = set()
+            for exp in case["expect"]:
+                expected += 1
+                hit = next((n for n, i in enumerate(chosen) if n not in used and
+                            any(k in i["title"].lower() for k in exp["keywords"])), None)
+                if hit is None:
+                    failures.append({"case": case["id"], "missing": exp["keywords"][0],
+                                     "proposed": [i["title"] for i in chosen]})
+                    continue
+                used.add(hit)
+                found += 1
+                item = chosen[hit]
+                if "assignee" in exp:
+                    owner_n += 1
+                    owner_ok += item["assignee"] == exp["assignee"]
+                    if item["assignee"] != exp["assignee"]:
+                        failures.append({"case": case["id"], "task": item["title"], "owner": item["assignee"],
+                                         "expected": exp["assignee"]})
+                if "due" in exp:
+                    due_n += 1
+                    due_ok += item["due"] == exp["due"]
+                    if item["due"] != exp["due"]:
+                        failures.append({"case": case["id"], "task": item["title"], "due": item["due"],
+                                         "expected": exp["due"]})
+            ticked += len(chosen)
+            invented += len(chosen) - len(used)
+            bad = [i["title"] for i in chosen if i["assignee"] in case.get("forbid_owners", [])
+                   or any(f in i["title"].lower() for f in case.get("forbid_titles", []))]
+            if bad:
+                forbidden += 1
+                failures.append({"case": case["id"], "forbidden": bad})
+            if did:
+                pm_ai.discard(conn, leader, did)
+    finally:
+        pm_ai.AI_CALLS_PER_HOUR = old_limit
+    rate = lambda a, b: round(a / b, 3) if b else None   # noqa: E731
+    return {"metrics": {"task_recall": rate(found, expected), "owner_accuracy": rate(owner_ok, owner_n),
+                        "deadline_accuracy": rate(due_ok, due_n),
+                        "extra_task_rate": rate(invented, ticked), "unsafe_rate": rate(forbidden, len(spec["cases"]))},
+            "failures": failures}
+
+
 def eval_end_to_end(agent, questions, llm, offline) -> tuple[dict, list[dict]]:
     rows, ragas_rows = [], []
     for q in questions:
@@ -321,7 +388,7 @@ def check_thresholds(results: dict, mode: str) -> list[dict]:
             continue
         agent, metric = name.split(".", 1)
         value = results.get(agent, {}).get("metrics", {}).get(metric)
-        lower_is_better = metric in ("false_alarm_rate",)
+        lower_is_better = metric in ("false_alarm_rate", "extra_task_rate", "unsafe_rate")
         ok = value is not None and (value <= limit if lower_is_better else value >= limit)
         out.append({"metric": name, "value": value, "threshold": limit, "ok": ok,
                     "direction": "≤" if lower_is_better else "≥"})
@@ -346,6 +413,7 @@ def run(offline: bool, folder: Path, only: list[str] | None = None, embedder=Non
         "memory": lambda: eval_memory(conn, agent),
         "verifier": lambda: eval_verifier(conn, llm, offline),
         "guardrails": lambda: eval_guardrails(conn, index),
+        "planner": lambda: eval_planner(conn, llm, offline),
     }
     ai_failures = {}
     for name in AGENTS:

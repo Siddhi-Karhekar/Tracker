@@ -13,7 +13,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from teampulse import auth, pm, pm_sync, ui
+from teampulse import auth, pm, pm_ai, pm_sync, ui
 from teampulse.auth import Actor
 
 STATUS_TONE = {"backlog": "quiet", "todo": "quiet", "in_progress": "info", "review": "info", "blocked": "bad",
@@ -298,7 +298,29 @@ def _subtasks(conn, actor: Actor, t: dict, work: bool) -> None:
                 _do(lambda: pm.create_task(conn, actor, t["project_id"], title, parent_id=t["id"]), "Subtask added.")
 
 
+def _draft_button(conn, actor: Actor, t: dict) -> None:
+    """Writes a suggested note into the form from linked commits, PRs, chat and finished subtasks. Saves nothing."""
+    if st.button("Draft my update from GitHub and subtasks", key=f"draft-{t['id']}", icon=":material/edit_note:",
+                 help="Uses only what's linked to this task since your last update. You edit it and save it yourself."):
+        from teampulse.webapp import get_agent
+        try:
+            draft = pm_ai.draft_update(conn, actor, t["id"], get_agent().llm)
+        except (auth.AuthError, auth.PermissionDenied) as exc:
+            st.info(str(exc))
+            return
+        st.session_state[f"note-{t['id']}"] = draft["text"]
+        st.session_state[f"draft-src-{t['id']}"] = draft
+        st.rerun()
+    src = st.session_state.get(f"draft-src-{t['id']}")
+    if src:
+        how = "rules" if src["method"] == "rules" else f"AI ({src['method']})"
+        st.caption(f"Draft by {how} from {len(src['evidence'])} item{'s' if len(src['evidence']) != 1 else ''} since "
+                   f"{src['since'][:10]}. Check it, change it, then Save update. Your progress number is yours to set.")
+
+
 def _update_form(conn, actor: Actor, t: dict, manage: bool) -> None:
+    if not t["parent_id"]:
+        _draft_button(conn, actor, t)
     choices = [s for s in pm.STATUSES if manage or t["parent_id"] or s != "done"]
     if t["status"] not in choices:
         choices.append(t["status"])
@@ -541,3 +563,54 @@ def timeline_view(tasks: list[dict], milestones: list[dict]) -> None:
     st.altair_chart(alt.layer(*layers).properties(height=max(160, 30 * len(rows))), width="stretch")
     st.caption("Bars run from the start date (or the day the task was created) to the deadline. The dashed red line is "
                "today; blue lines are milestones.")
+
+
+# ---- AI planner (team leader) -----------------------------------------------------------------------------
+
+def ai_planner(conn, actor: Actor, project_id: int, llm) -> None:
+    """Paste a goal or meeting notes; review the proposed tasks; create only the ones you tick."""
+    pending = pm_ai.drafts(conn, project_id)
+    with st.expander("Plan with AI" + (f" ({len(pending)} proposal waiting)" if pending else ""),
+                     icon=":material/auto_awesome:", expanded=bool(pending)):
+        st.caption("Paste a goal or meeting notes. The AI proposes tasks with owners, priority, size and deadlines; "
+                   "nothing is created until you tick items and press Create. Without an AI key, one task per "
+                   "bullet line is suggested by rules (“- Riya: design the form by 8 Nov”).")
+        with st.form("ai-plan", clear_on_submit=True, border=False):
+            notes = st.text_area("Goal or meeting notes", max_chars=pm_ai.MAX_NOTES, height=140,
+                                 placeholder="- Riya: design the feedback form by 8 Nov\n- Aman will set up error "
+                                             "logging (urgent)\n- Write the demo script")
+            if st.form_submit_button("Propose tasks", icon=":material/auto_awesome:"):
+                _do(lambda: pm_ai.propose_plan(conn, actor, project_id, notes, llm), "Proposal ready below.")
+        people = ["", *pm.members(conn)]
+        for draft in pending:
+            how = "the rules (no AI answered)" if draft["method"] == "rules" else f"AI ({draft['method']})"
+            st.markdown(f"**Proposal from {ui.e(ui.ago(draft['created_at']))}** <span class='tp-meta'>by "
+                        f"{ui.e(how)} · items with a warning start unticked</span>", unsafe_allow_html=True)
+            frame = pd.DataFrame([{
+                "Create": it["selected"], "Title": it["title"], "Assigned to": it["assignee"] or "",
+                "Priority": it["priority"], "Size": it["size"],
+                "Deadline": date.fromisoformat(it["due"]) if it["due"] else None,
+                "Subtasks": "; ".join(it["subtasks"]),
+                "Waits for": ", ".join(str(d + 1) for d in it["depends_on"]),
+                "Watch out": "; ".join(it["flags"]), "From your notes": it["quote"]} for it in draft["items"]])
+            frame.index = range(1, len(frame) + 1)
+            edited = st.data_editor(frame, key=f"plan-{draft['id']}", width="stretch", num_rows="fixed",
+                                    disabled=["Waits for", "Watch out", "From your notes"], column_config={
+                                        "Assigned to": st.column_config.SelectboxColumn(options=people),
+                                        "Priority": st.column_config.SelectboxColumn(options=pm.PRIORITIES),
+                                        "Size": st.column_config.SelectboxColumn(options=list(pm.WEIGHTS)),
+                                        "Deadline": st.column_config.DateColumn(format="YYYY-MM-DD"),
+                                        "Title": st.column_config.TextColumn(max_chars=200)})
+            c1, c2, _ = st.columns([1, 1, 3])
+            if c1.button("Create selected tasks", key=f"plan-ok-{draft['id']}", type="primary"):
+                items = []
+                for (_, row), it in zip(edited.iterrows(), draft["items"]):
+                    due = row["Deadline"]
+                    items.append({**it, "selected": bool(row["Create"]), "title": str(row["Title"] or ""),
+                                  "assignee": row["Assigned to"] or None, "priority": row["Priority"],
+                                  "size": int(row["Size"]),
+                                  "due": None if due is None or pd.isna(due) else pd.Timestamp(due).date().isoformat(),
+                                  "subtasks": [x.strip() for x in str(row["Subtasks"] or "").split(";") if x.strip()]})
+                _do(lambda items=items, d=draft: pm_ai.accept_plan(conn, actor, d["id"], items), "Tasks created.")
+            if c2.button("Discard", key=f"plan-no-{draft['id']}"):
+                _do(lambda d=draft: pm_ai.discard(conn, actor, d["id"]), "Proposal discarded.")
