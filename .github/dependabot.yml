@@ -1,5 +1,6 @@
 # Weekly pull requests for outdated or vulnerable dependencies. Each runs the full CI (tests, security job) before
-# anyone merges it; nothing updates by itself.
+# anyone merges it; nothing updates by itself. Updates are grouped into one PR per ecosystem, so related actions
+# (CodeQL init and analyze must match) move together and the team reviews one PR, not ten.
 version: 2
 updates:
   - package-ecosystem: pip
@@ -7,7 +8,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      python-packages:
+        patterns: ["*"]
   - package-ecosystem: github-actions      # keeps the pinned commit SHAs current, with the version in the comment
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
