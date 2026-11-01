@@ -13,7 +13,7 @@ openai>=1.40                    # client for Groq / Gemini / Ollama OpenAI-compa
 streamlit>=1.50                 # st.navigation, st.pills, width="stretch"
 
 # Week 4: tracing (optional; the Phoenix UI itself is `pip install arize-phoenix`)
-arize-phoenix-otel>=0.9
+arize-phoenix-otel>=0.17.2
 openinference-instrumentation-langchain>=0.1
 openinference-instrumentation-openai>=0.1
 
