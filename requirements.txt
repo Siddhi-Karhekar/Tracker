@@ -5,7 +5,7 @@ python-dotenv>=1.0
 
 # Week 3: retrieval agent + app
 chromadb>=1.0
-fastembed>=0.4                  # multilingual embeddings via ONNX: small, no PyTorch
+fastembed>=0.9.1                  # multilingual embeddings via ONNX: small, no PyTorch
 # Optional, heavier (~2 GB with PyTorch): pip install sentence-transformers
 # and set TEAMPULSE_EMBEDDER=intfloat/multilingual-e5-small
 langgraph>=1.0
