@@ -45,11 +45,14 @@ def confirm_box():
     with st.form("reauth", border=True):
         st.markdown("**Confirm it's you** to reset passwords, deactivate accounts, create a leader or change "
                     "capabilities.")
-        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        from teampulse import mfa
+        with_code = mfa.enabled(conn, actor.id)
+        c1, c2, c3 = st.columns([3, 2 if with_code else 0.01, 1], vertical_alignment="bottom")
         pw = c1.text_input("Your password", type="password", autocomplete="current-password", max_chars=128)
-        if c2.form_submit_button("Confirm", icon=":material/verified_user:"):
+        code = c2.text_input("Code from your app", max_chars=12) if with_code else None
+        if c3.form_submit_button("Confirm", icon=":material/verified_user:"):
             try:
-                auth.confirm_password(conn, actor, pw)
+                auth.confirm_password(conn, actor, pw, code)
                 st.rerun()
             except auth.AuthError as exc:
                 st.error(str(exc))

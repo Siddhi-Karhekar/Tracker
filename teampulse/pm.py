@@ -175,11 +175,18 @@ def _notify(conn, actor: Actor, recipients, task_id: int | None, text: str) -> N
                      (r, task_id, text[:300], iso(now())))
 
 
+TASK_COLUMNS = {"title", "description", "priority", "status", "reported_progress", "estimate_hours", "blocked_reason",
+                "start_date", "due_date", "completed_at", "milestone_id", "weight", "verified_progress", "verified_by",
+                "verified_at"}
+
+
 def _save(conn, task: dict, version: int | None, fields: dict) -> None:
     """Update a task, refusing if someone else saved it since `version` (None skips the check)."""
+    if not set(fields) <= TASK_COLUMNS:   # column names go into the SQL text, so only known names, ever
+        raise ValueError(f"Unknown task fields: {sorted(set(fields) - TASK_COLUMNS)}")
     sets = "".join(f"{k} = ?, " for k in fields)
     params = [*fields.values(), iso(now()), task["id"]]
-    sql = f"UPDATE pm_tasks SET {sets}updated_at = ?, version = version + 1 WHERE id = ?"
+    sql = f"UPDATE pm_tasks SET {sets}updated_at = ?, version = version + 1 WHERE id = ?"  # nosec B608  # fixed column names (TASK_COLUMNS) or ? placeholders
     if version is not None:
         sql += " AND version = ?"
         params.append(int(version))
@@ -574,7 +581,7 @@ def notifications(conn, actor: Actor, unread_only: bool = True, limit: int = 30)
     if not boxes:
         return []
     marks = ",".join("?" * len(boxes))
-    sql = f"SELECT * FROM pm_notifications WHERE recipient IN ({marks})"
+    sql = f"SELECT * FROM pm_notifications WHERE recipient IN ({marks})"  # nosec B608  # fixed column names (TASK_COLUMNS) or ? placeholders
     if unread_only:
         sql += " AND read_at IS NULL"
     return [dict(r) for r in conn.execute(sql + " ORDER BY id DESC LIMIT ?", (*boxes, limit))]
@@ -586,7 +593,7 @@ def mark_read(conn, actor: Actor) -> int:
         return 0
     marks = ",".join("?" * len(boxes))
     with conn:
-        return conn.execute(f"UPDATE pm_notifications SET read_at = ? WHERE read_at IS NULL "
+        return conn.execute(f"UPDATE pm_notifications SET read_at = ? WHERE read_at IS NULL "  # nosec B608  # fixed column names (TASK_COLUMNS) or ? placeholders
                             f"AND recipient IN ({marks})", (iso(now()), *boxes)).rowcount
 
 
@@ -775,7 +782,7 @@ def dashboard(conn, project_id: int | None = None, on: date | None = None) -> di
     if project_id:
         req_sql += " AND t.project_id = ?"
         req_params.append(int(project_id))
-    act_sql = ("SELECT h.*, t.title FROM pm_history h JOIN pm_tasks t ON t.id = h.task_id"
+    act_sql = ("SELECT h.*, t.title FROM pm_history h JOIN pm_tasks t ON t.id = h.task_id"  # nosec B608  # fixed column names (TASK_COLUMNS) or ? placeholders
                + (" WHERE t.project_id = ?" if project_id else "") + " ORDER BY h.id DESC LIMIT 15")
     return {
         "total": total, "by_status": by_status,

@@ -234,6 +234,6 @@ def test_account_page_creates_shows_once_and_removes(team, monkeypatch):
     shown = " ".join(c.value for c in at.code)
     assert '"TEAMPULSE_TOKEN": "tp_' in shown and "teampulse.mcp_server" in shown and "PYTHONPATH" in shown
     at.run()
-    assert not at.code                                                       # shown once
+    assert not any("TEAMPULSE_TOKEN" in c.value for c in at.code)            # shown once
     next(b for b in at.button if b.label == "Remove").click().run()
     assert auth.list_api_tokens(team, person(team, "kabir")) == []

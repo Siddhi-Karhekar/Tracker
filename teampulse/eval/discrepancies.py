@@ -63,7 +63,7 @@ def run_with_key(conn, index, llm: LLM | None, key_path: str) -> tuple[dict, str
         copy = _copy(conn)
         with copy:   # start each mode from the same clean slate
             for table in ("signals", "extractions", "claims", "tasks", "task_links", "discrepancies"):
-                copy.execute(f"DELETE FROM {table}")
+                copy.execute(f"DELETE FROM {table}")  # nosec B608  # fixed table names in a constant tuple
         claims.refresh(copy, index, model, scan_chat=True)
         results[name] = match(disc.detect(copy, model), gold)
 

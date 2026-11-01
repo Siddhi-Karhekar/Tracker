@@ -20,7 +20,7 @@ Every request, account, AI agent, integration and AI-generated action is authori
 - **Every action is checked, and that's proven.** `teampulse/security.py` reads the source of every module that
   acts for someone. Each public function taking an `actor` must reach a permission check: directly, through
   another checked function, or because it only touches the caller's own data (listed with the reason). The test
-  suite and CI fail on any function that doesn't. Today that's 61 of 61.
+  suite and CI fail on any function that doesn't. Today that's 65 of 65.
 - **The AI never decides who may see what.** Specialist agents behind pages a member can't open are refused
   before they run. Contribution data of people who haven't opted in is removed before it reaches the AI, not
   only filtered afterwards. No AI changes the team's data by itself: planner proposals need a leader's
@@ -197,6 +197,54 @@ Connect an AI assistant).
 - **Prompt injection.** Task text, comments and evidence are written by team members, so the server tells the
   assistant to treat them as data. The real protection is that no tool can do more than the person could.
 
+## Two-factor sign-in and sessions
+
+- **Authenticator app codes (TOTP, RFC 6238)**, implemented with the standard library and checked against the RFC's
+  test vector. Set up on My account: scan or type the key, prove it with a code and your password.
+- **Signing in is two steps.** The password only creates a pending sign-in (5 minutes) that isn't a session; the
+  session is issued after the code. Wrong codes count towards the same lockout as wrong passwords.
+- **A code works once.** The last accepted time step is stored, so a replayed code is refused, also when two
+  requests race.
+- **Recovery codes.** Eight, shown once, stored as hashes, each spent on use. A leader's reset (or
+  `python -m teampulse.auth reset`) clears two-factor so a person who lost their phone can set it up again.
+- **Confirming it's you** for sensitive actions asks for the code as well as the password once it's on.
+- **Required for leaders** with `TEAMPULSE_MFA=leaders`: until a leader sets it up, every permission is refused and
+  only My account opens. AI-assistant tokens of such an account are refused too.
+- **Sessions.** My account lists your sessions (browser, started, last active) and can sign the others out. A
+  session token presented by a different browser than the one it was issued to is revoked and logged
+  (`auth.session_moved`).
+
+## Contribution report integrity
+
+Approving your contribution report records a digest of every evidence item and claim it was based on. Each time the
+report is shown or the poller runs, the digests are compared. If something the member approved was later changed or
+removed, the approval **lapses**: the report goes back to "changed", the member is notified, the reason is shown, and
+`contrib.approval_lapsed` is logged. New work since the approval doesn't lapse it. The team only sees reports whose
+approval still matches.
+
+## AI inputs: injected instructions and personal details
+
+Every AI request passes through `LLM.chat`, so these apply to every agent:
+
+- **Keys and tokens** are removed (always).
+- **Email addresses and phone numbers** are removed (`TEAMPULSE_AI_REDACT_PII`, on by default).
+- **Injected instructions** ("ignore previous instructions", "you are now…", fake system markup, "send it to
+  http://…", and Hinglish variants) are detected by patterns, not by an AI that could be talked out of it. The
+  request gets an explicit notice that this text is quoted data. The source items are listed on the Security page.
+- Only counts and kinds are logged, never the text. Details and the full guardrail catalogue:
+  [docs/AI_SECURITY.md](docs/AI_SECURITY.md).
+
+## Supply chain
+
+- Every GitHub Action is pinned to a full commit SHA (a moved tag can't change what runs); the workflow token is
+  read-only; checkout doesn't keep credentials.
+- The `security` CI job: secret scan of all files and history, authorization coverage, **Bandit** (medium severity
+  and above; each reviewed exception is marked inline with its reason), and a **CycloneDX SBOM** uploaded with
+  every run.
+- **CodeQL** (security-extended queries) on every push, pull request and weekly.
+- **pip-audit** on the exact locked versions; **Dependabot** proposes pip and Actions updates weekly.
+- `tests/test_supply_chain.py` fails if an action is unpinned or a workflow asks for write access it doesn't need.
+
 ## Tamper-evident activity log, encrypted backups
 
 - **Activity log.** Every entry stores the hash of the entry before it. Changing or deleting an entry breaks the
@@ -223,6 +271,8 @@ log, the database or the code when the page opens:
 - account and permission changes, and capabilities granted
 - AI-assistant connections (active, can update, expiring) and their calls and refusals
 - guardrail detections and secrets kept from the AI
+- injection attempts isolated (and the items they came from), personal details kept from the AI
+- leaders with two-factor sign-in, sessions ended for moving browser, report approvals that lapsed
 - secrets found anywhere in the activity log (should be 0)
 - messages still stored from people who left the Discord opt-in (should be 0)
 - the last backup: when, encrypted or not, verified
@@ -233,7 +283,7 @@ A refused request means the controls worked. It's shown as a count, never as a p
 |---|---|---|
 | Unauthorized access succeeds 0 times | Every write called as a signed-out caller and as the wrong member (tests) | 0 |
 | No data shared between teams | One install per team; tests show sign-ins, tokens, projects and the index don't cross | Separate files |
-| Every action behind a permission check | Source scan in tests and CI | 61 / 61 |
+| Every action behind a permission check | Source scan in tests and CI | 65 / 65 |
 | No privilege escalation | Grants allowlisted, admin never grantable, no self-grant, tampered rows ignored (tests) | 0 paths |
 | Secrets in logs: 0 | Security page scans the whole activity log; CI scans every file and the full git history | 0 |
 | Secrets sent to an AI provider: 0 | Redaction on every AI request (test with a fake provider) | 0 |
@@ -253,6 +303,8 @@ A refused request means the controls worked. It's shown as a count, never as a p
 | `TEAMPULSE_IDLE_MINUTES` | `60` | Sign out after this long without activity. |
 | `TEAMPULSE_ASK_PER_HOUR` | `60` | AI questions per person per hour. |
 | `TEAMPULSE_CONTRIB_REVIEW` | `on` | `off` makes members strictly read-only (no report approval). |
+| `TEAMPULSE_MFA` | `optional` | `leaders` requires two-factor sign-in for team leaders; until they set it up they can only open My account. |
+| `TEAMPULSE_AI_REDACT_PII` | `on` | Remove email addresses and phone numbers from AI requests. `off` only with a local model. |
 | `TEAMPULSE_PUBLIC_DEMO` | `off` | `on` adds one-click demo sign-ins for the fictional team, and switches off account, settings, connection-check and evaluation changes so one visitor can't change them for everyone. Never use with real data. |
 | `TEAMPULSE_LLM_MAX_TOKENS` | `1500` | Longest AI reply. |
 | `TEAMPULSE_AUDIT_DAYS` / `TEAMPULSE_CACHE_DAYS` | `180` / `30` | Retention for the activity log and cached AI responses. |
@@ -290,9 +342,20 @@ A refused request means the controls worked. It's shown as a count, never as a p
   - secrets removed before AI requests
   - the secret scanner
   - the Security page
+  - injection detection and isolation, PII redaction
+- `tests/test_identity.py`: two-factor setup and sign-in, replay, recovery codes, expiry and lockout, required for
+  leaders, step-up with the code, your sessions, a session moving browser, approval lapse (and new work not lapsing
+  it), and the sign-in and account pages.
+- `tests/test_supply_chain.py`: pinned actions, least-privilege workflows, Dependabot.
 - CI's `security` job scans every tracked file and the full git history for keys
   (`python scripts/scan_secrets.py`) and checks authorization coverage.
 
 ## Reporting a problem
 
 If you find a security issue, message the team leader privately rather than posting it in the group chat.
+For the TeamPulse code itself, use GitHub's private vulnerability reporting on the repository (Security → Report a
+vulnerability) rather than a public issue, or contact the repository owner directly. Please include steps to
+reproduce.
+
+Related: [threat model](docs/THREAT_MODEL.md) · [AI security](docs/AI_SECURITY.md) ·
+[privacy](docs/PRIVACY.md) · [incident response](docs/INCIDENT_RESPONSE.md)

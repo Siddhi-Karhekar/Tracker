@@ -62,7 +62,7 @@ def _load_events(conn: sqlite3.Connection, ids: list[str]) -> dict[str, sqlite3.
     if not ids:
         return {}
     marks = ",".join("?" * len(ids))
-    return {r["id"]: r for r in conn.execute(f"SELECT * FROM events WHERE id IN ({marks})", ids)}
+    return {r["id"]: r for r in conn.execute(f"SELECT * FROM events WHERE id IN ({marks})", ids)}  # nosec B608  # only ? placeholders
 
 
 def _evidence_item(conn, row: sqlite3.Row, why: str, score: float | None) -> dict:

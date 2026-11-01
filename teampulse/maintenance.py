@@ -93,7 +93,7 @@ def _check(conn, label: str) -> dict:
     if result != "ok":
         raise ValueError(f"{label} failed its integrity check: {result}")
     tables = {"events", "users", "audit_log"}
-    return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in sorted(tables)}
+    return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in sorted(tables)}  # nosec B608  # fixed table names in a constant set
 
 
 def _open_backup(path: str, key: str | None = None) -> sqlite3.Connection:

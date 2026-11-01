@@ -57,6 +57,8 @@ def reset_credentials(conn, actor: Actor, user_id: str) -> tuple[str, str]:
     with conn:
         conn.execute("UPDATE users SET password_hash = ?, must_change = 1 WHERE id = ?", (auth.hash_password(password), user_id))
         conn.execute("DELETE FROM login_throttle WHERE key = ?", (user["username"].lower(),))
+    from teampulse import mfa
+    mfa.clear(conn, user_id)              # account recovery: a lost phone is a common reason for a reset
     auth.revoke_all(conn, user_id)
     audit(conn, actor, "account.reset", user["username"])
     return user["username"], password
@@ -195,7 +197,9 @@ def review_own_report(conn, actor: Actor, status: str, note: str = "") -> None:
     if status not in ("approved", "disputed"):
         raise AuthError("Unknown choice.")
     from teampulse import contributions
-    contributions.set_review(conn, actor.member_name, status, note[:1000])
+    member = next((m for m in contributions.members(conn) if m.name == actor.member_name), None)
+    snapshot = contributions.evidence_snapshot(conn, member) if member and status == "approved" else None
+    contributions.set_review(conn, actor.member_name, status, note[:1000], snapshot)
     audit(conn, actor, "contrib.review", actor.member_name, detail=status)
 
 

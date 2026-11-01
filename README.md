@@ -82,7 +82,7 @@ Underneath it all:
   - a Security page that shows only measured numbers.
 - **Guardrails** on every AI answer.
 - **Evaluation**: a full suite per agent, plus RAGAS and LangSmith.
-- **Tests**: 309 automated tests, plus a real-browser test.
+- **Tests**: 328 automated tests, plus a real-browser test.
 
 The design decisions, permission matrix and data model for project management are in
 [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
@@ -529,12 +529,13 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **309 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **328 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
 regression test for every bug found by real AI runs, and project management (permissions per role and per
 assignee, workflow rules, two people editing at once, both roles through the pages). A Playwright test runs the
 whole assign → update → review workflow in real Chromium (`TEAMPULSE_E2E=1 python -m pytest tests/e2e`). CI runs them on every push: Linux (Python 3.12 and
-3.13), Windows, the browser test, lint, dependency scan, and the RAGAS wiring check.
+3.13), Windows, the browser test, lint, dependency scan, secret scan, Bandit, SBOM, CodeQL, and the RAGAS
+wiring check.
 
 ### Per-agent evaluation
 Each agent is tested on its own job against the demo answer key, with a threshold per metric
@@ -631,7 +632,7 @@ team or get your team's agreement. Runs without a key are tested to make no netw
   **tamper-evident**: each entry is chained to the one before by hash, and the Security page shows if anything
   was changed or removed.
 - **Deny by default, one decision point.** `auth.authorize()` checks the capability and then whether it's *your*
-  task, report, workspace or token. A source scan proves every action reaches a check (61/61), and CI fails if
+  task, report, workspace or token. A source scan proves every action reaches a check (65/65), and CI fails if
   a new one doesn't.
 - **Grantable capabilities.** A leader can make a member a co-lead, or give them audit access, without making
   them an admin. Account and security administration can't be granted. Changes apply on the next request.
@@ -641,7 +642,19 @@ team or get your team's agreement. Runs without a key are tested to make no netw
 - **Encrypted backups** (`TEAMPULSE_BACKUP_KEY`). The snapshot is checked in memory, so no plaintext copy is
   written.
 - **One team per install.** Separate database, index and cache files, so teams can't see each other's data.
-- **Secret scanning.** CI checks every file and the whole git history for API keys.
+- **Two-factor sign-in** with any authenticator app (My account). Codes work once; eight recovery codes.
+  `TEAMPULSE_MFA=leaders` makes it required for leaders. Confirming it's you then needs the code too.
+- **Your sessions.** My account lists where you're signed in and signs out the others. A session that turns up
+  in a different browser is ended and logged.
+- **Approvals can't be quietly undermined.** Approving a contribution report records a digest of the evidence.
+  If that evidence is later changed or removed, the approval lapses and the member is told. New work doesn't
+  lapse it.
+- **Injected instructions are isolated.** Chat, issue or page text that tries to instruct the AI is detected
+  (patterns, no AI), marked as data in the request, counted, and listed on the Security page.
+- **Personal details stay out of AI requests.** Email addresses and phone numbers are removed before sending
+  (`TEAMPULSE_AI_REDACT_PII`, on by default).
+- **Supply chain.** CI scans every file and the whole git history for API keys, runs Bandit and CodeQL, audits
+  dependencies, builds a CycloneDX SBOM, pins every GitHub Action to a commit, and Dependabot proposes updates.
 - **Project management:** members can change only tasks assigned to them, and only up to "Under review". Two
   people saving the same task at once can't overwrite each other: the later save is refused with "reload".
   Changes are rate-limited.
@@ -652,7 +665,8 @@ team or get your team's agreement. Runs without a key are tested to make no netw
   reset, password change or deactivation.
 
 Full details: [SECURITY.md](SECURITY.md) (both pre-launch checklists) and [AUDIT.md](AUDIT.md) (findings,
-fixes, deployment checklist, open risks).
+fixes, deployment checklist, open risks). Also: [threat model](docs/THREAT_MODEL.md),
+[AI security](docs/AI_SECURITY.md), [privacy](docs/PRIVACY.md), [incident response](docs/INCIDENT_RESPONSE.md).
 
 ---
 
@@ -713,6 +727,8 @@ All settings live in `.env` (copy `.env.example`). Only an AI key is needed for 
 | | `TEAMPULSE_SESSION_HOURS` / `TEAMPULSE_IDLE_MINUTES` | `12` / `60` | Session limits |
 | | `TEAMPULSE_ASK_PER_HOUR` | `60` | Questions per person per hour |
 | | `TEAMPULSE_CONTRIB_REVIEW` | `on` | Members approve their own report |
+| | `TEAMPULSE_MFA` | `optional` | `leaders`: two-factor sign-in required for team leaders |
+| | `TEAMPULSE_AI_REDACT_PII` | `on` | Remove emails and phone numbers from AI requests |
 | AI assistant (MCP) | `TEAMPULSE_TOKEN` | – | Set in Claude Desktop's settings, not in `.env` (see 4) |
 | | `TEAMPULSE_MCP_AI` | `on` | `off`: `propose_tasks` uses the rules instead of your AI provider |
 | Demo | `TEAMPULSE_PUBLIC_DEMO` / `TEAMPULSE_DEMO_QUESTION_LIMIT` | `off` / `15` | Public demo mode |
@@ -746,6 +762,8 @@ teampulse/
   guardrails.py             output checks on every answer
   agents/                   supervisor, retrieval, blockers, discrepancy, contributions, baseline (plain RAG)
   auth.py, actions.py       accounts, sessions, roles; the only write path (server-side checks)
+  mfa.py                    two-factor sign-in (TOTP, standard library), recovery codes
+  injection.py              detects and isolates instructions hidden in team text
   pm.py, pm_ui.py           project management: rules and permission checks; task cards and task panel
   pm_sync.py                planned tasks ↔ GitHub issues / Notion pages: evidence, disagreements, import
   pm_ai.py                  AI planner (propose → confirm), do next, progress-update drafts, weekly summary
@@ -762,13 +780,15 @@ teampulse/
 eval_data/                  18 golden questions (with reference answers), 60 Hinglish messages,
                             agent cases, thresholds
 docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
+docs/THREAT_MODEL.md · AI_SECURITY.md · PRIVACY.md · INCIDENT_RESPONSE.md
 scripts/scan_secrets.py     secret scan of every tracked file and the full git history (CI)
-tests/                      309 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
+tests/                      328 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment
 SECURITY.md · AUDIT.md      security design and checklists · production-readiness audit
-.github/workflows/ci.yml    CI
+.github/workflows/ci.yml    CI (tests on Linux and Windows, browser test, lint, security job)
+.github/workflows/codeql.yml  CodeQL code scanning · .github/dependabot.yml  weekly update proposals
 ```
 
 ---
@@ -822,7 +842,7 @@ SECURITY.md · AUDIT.md      security design and checklists · production-readin
 | Project management: all five phases of the 2.0 plan ([details](docs/TEAMPULSE_2.md#where-the-upgrade-plan-stands)) | ~95% |
 | UI | ~95% |
 | Security (zero trust: policy, grants, re-authentication, tamper-evident log, encrypted backups, secret redaction and scanning, measured Security page) | ~100% |
-| Tests and CI (309 tests, real-browser test, Linux and Windows) | ~100% |
+| Tests and CI (328 tests, real-browser test, Linux and Windows) | ~100% |
 | Evaluation with a real AI | ~60% |
 | Real-world use with a live team | ~10% |
 | Public deployment and demo video | ~30% |

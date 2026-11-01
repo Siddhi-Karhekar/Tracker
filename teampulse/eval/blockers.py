@@ -46,7 +46,7 @@ def jsonl_to_db(rows: list[dict], conn: sqlite3.Connection) -> dict[str, str]:
 
 def gold_from_db(conn: sqlite3.Connection) -> dict[str, str]:
     return {r[0]: r[1] for r in conn.execute(
-        "SELECT l.event_id, l.label FROM labels l JOIN events e ON e.id = l.event_id WHERE l.label IN "
+        "SELECT l.event_id, l.label FROM labels l JOIN events e ON e.id = l.event_id WHERE l.label IN "  # nosec B608  # fixed label constants from TYPES
         f"({','.join(repr(t) for t in TYPES)})")}
 
 

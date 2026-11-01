@@ -12,6 +12,7 @@ conn = get_agent().conn
 ui.header("Contributions", "What each member did, from GitHub, Notion and chat. Evidence, not scores: each member "
           "reads their own report first, can add context, and decides when the team sees it.")
 
+contrib.refresh_integrity(conn)   # approvals lapse if the evidence they covered was changed since
 everyone = contrib.members(conn)
 if not everyone:
     ui.empty("No team members yet.", "Teammates opt in by typing !teampulse join in Discord.")
@@ -39,7 +40,11 @@ with mine:
         else:
             report = contrib.build_report(conn, member, days)
             review = contrib.get_review(conn, me)
-            if review:
+            if review and review["status"] == "changed":
+                st.markdown(ui.row("Some evidence in your report changed after you approved it.",
+                                   "The team can't see it until you look again and approve or hide it.", "warn"),
+                            unsafe_allow_html=True)
+            elif review:
                 word = "shared it with the team" if review["status"] == "approved" else "asked to keep it hidden"
                 st.markdown(ui.row(f"You {word} {ui.ago(review['updated_at'])}.", "", "ok" if review["status"] == "approved"
                                    else "warn"), unsafe_allow_html=True)
@@ -66,7 +71,9 @@ with team:
             hidden.append(f"{ui.e(m.name)} hasn't opted in.")
         elif not contrib.visible_to_team(conn, m):
             review = contrib.get_review(conn, m.name)
-            why = "asked to keep it hidden" if review and review["status"] == "disputed" else "hasn't reviewed it yet"
+            why = ("asked to keep it hidden" if review and review["status"] == "disputed" else
+                   "needs to look again: evidence changed after they approved it" if review and review["status"] == "changed"
+                   else "hasn't reviewed it yet")
             hidden.append(f"{ui.e(m.name)}'s report is hidden: {m.name} {why}.")
         else:
             with st.container(border=True):

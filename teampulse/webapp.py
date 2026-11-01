@@ -100,7 +100,7 @@ def current_actor(conn=None) -> auth.Actor | None:
         return auth.LOCAL_ADMIN
     conn = conn or get_agent_quiet().conn
     token = st.session_state.get(TOKEN_KEY)
-    actor = auth.resolve(conn, token)
+    actor = auth.resolve(conn, token, user_agent())
     if actor is None and token:
         _clear_session()
         st.session_state.signed_out_reason = "Your session ended. Please sign in again."
@@ -112,9 +112,34 @@ def _clear_session() -> None:
         del st.session_state[key]
 
 
+def user_agent() -> str | None:
+    """The browser's own description of itself. Not proof of identity; used to notice a session moving browsers."""
+    try:
+        return st.context.headers.get("User-Agent")
+    except Exception:   # outside a browser request (tests, scripts)
+        return None
+
+
+PENDING_KEY = "tp_pending_mfa"
+
+
 def sign_in(conn, username: str, password: str) -> auth.Actor:
-    token, actor = auth.login(conn, username, password)
+    """Raises auth.MFARequired after a correct password when two-factor is on; the page then asks for the code."""
+    try:
+        token, actor = auth.login(conn, username, password, user_agent())
+    except auth.MFARequired as need:
+        _clear_session()
+        st.session_state[PENDING_KEY] = need.pending
+        raise
     _clear_session()                      # nothing from a previous user's session carries over
+    st.session_state[TOKEN_KEY] = token
+    return actor
+
+
+def finish_sign_in(conn, code: str) -> auth.Actor:
+    from teampulse import mfa
+    token, actor = mfa.complete_login(conn, st.session_state.get(PENDING_KEY), code, user_agent())
+    _clear_session()
     st.session_state[TOKEN_KEY] = token
     return actor
 

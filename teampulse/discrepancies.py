@@ -250,7 +250,7 @@ def run(conn: sqlite3.Connection, index=None, llm: LLM | None = None, refresh: b
 
 
 def open_items(conn: sqlite3.Connection, include: tuple = ("open",)) -> list[dict]:
-    rows = conn.execute(f"SELECT * FROM discrepancies WHERE state IN ({','.join('?' * len(include))})", include).fetchall()
+    rows = conn.execute(f"SELECT * FROM discrepancies WHERE state IN ({','.join('?' * len(include))})", include).fetchall()  # nosec B608  # only ? placeholders
     items = [{**dict(r), "sides": json.loads(r["sides"])} for r in rows]
     items.sort(key=lambda d: (SEVERITY_RANK[d["severity"]], d["first_seen"]))
     return items

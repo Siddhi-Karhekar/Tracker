@@ -31,6 +31,13 @@ def run_once(conn, scan_chat: bool = False, state: dict | None = None) -> None:
     except Exception as exc:
         log.error("Deadline reminders failed: %s", exc)
     try:
+        from teampulse import contributions
+        lapsed = contributions.refresh_integrity(conn)   # approvals whose evidence changed since
+        if lapsed:
+            log.info("Contribution approvals lapsed (evidence changed): %s", ", ".join(lapsed))
+    except Exception as exc:
+        log.error("Report integrity check failed: %s", exc)
+    try:
         from teampulse import pm_monitor
         checked = pm_monitor.run_checks(conn)   # suggestions only; never changes a task
         if checked["new"] or checked["resolved"]:

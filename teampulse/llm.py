@@ -55,17 +55,31 @@ def guard(messages: list[dict]) -> list[dict]:
     return messages
 
 
-def redact(messages: list[dict]) -> tuple[list[dict], int]:
-    """API keys and tokens pasted into chat, issues or pages are removed before any text leaves for an AI provider
-    (and before caching). Returns the cleaned messages and how many were removed."""
+# Personal details the AI doesn't need: email addresses and phone numbers. Strict enough not to touch dates
+# (2026-11-08), issue numbers or amounts: a phone number has 10 or more digits.
+EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+PHONE = re.compile(r"(?<![\w-])(?:\+\d{1,3}[\s-]?)?(?:\d[\s-]?){9,13}\d(?![\w-])")
+
+
+def pii_redaction_on() -> bool:
+    return (config.get("TEAMPULSE_AI_REDACT_PII", "on") or "on").lower() != "off"
+
+
+def redact(messages: list[dict]) -> tuple[list[dict], int, int]:
+    """Before any text leaves for an AI provider (and before caching): API keys and tokens are always removed;
+    email addresses and phone numbers too, unless TEAMPULSE_AI_REDACT_PII=off. Returns (messages, secrets, personal)."""
     from teampulse.guardrails import SECRET
-    count = 0
+    secrets_n = pii_n = 0
     out = []
     for m in messages:
         text, n = SECRET.subn("[secret removed]", str(m.get("content") or ""))
-        count += n
+        secrets_n += n
+        if pii_redaction_on() and m.get("role") != "system":
+            text, e = EMAIL.subn("[email]", text)
+            text, p = PHONE.subn("[phone]", text)
+            pii_n += e + p
         out.append({**m, "content": text})
-    return out, count
+    return out, secrets_n, pii_n
 
 
 @dataclass
@@ -187,13 +201,24 @@ class LLM:
         return hashlib.sha256(blob.encode()).hexdigest()
 
     def chat(self, messages: list[dict], json_mode: bool = False, temperature: float = 0.0) -> LLMReply:
-        messages, removed = redact(guard(messages))
+        from teampulse import injection
+        messages, removed, personal = redact(guard(messages))
+        messages, attempts = injection.isolate(messages)
         if removed:
             self.stats["redacted"] = self.stats.get("redacted", 0) + removed
             log.warning("Removed %d secret(s) from an AI request before sending it", removed)
-            if self.conn is not None:   # counted for the Security page; never the secret itself
-                from teampulse.auth import audit
+        if personal:
+            self.stats["pii_redacted"] = self.stats.get("pii_redacted", 0) + personal
+        if attempts:
+            self.stats["injection_flagged"] = self.stats.get("injection_flagged", 0) + 1
+        if self.conn is not None and (removed or personal or attempts):   # counted, never the content itself
+            from teampulse.auth import audit
+            if removed:
                 audit(self.conn, None, "security.secret_redacted", "ai request", detail=str(removed))
+            if personal:
+                audit(self.conn, None, "security.pii_redacted", "ai request", detail=str(personal))
+            if attempts:
+                audit(self.conn, None, "security.injection_flagged", "ai request", detail=",".join(attempts))
         key = self._cache_key(messages, json_mode, temperature)
         if self.conn is not None:
             row = self.conn.execute("SELECT response, provider FROM llm_cache WHERE key = ?", (key,)).fetchone()

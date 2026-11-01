@@ -39,8 +39,10 @@ access, ai, data, code, log = st.tabs(["Access", "AI safety", "Data and backups"
 
 with access:
     c = st.columns(4)
-    c[0].metric("Active team leaders", m["leaders"])
-    c[1].metric("Signed-in sessions", m["sessions_active"])
+    c[0].metric("Leaders with two-factor", f"{m['mfa_leaders']} of {m['leaders']}",
+                help=f"{m['mfa_users']} accounts in all use two-factor sign-in. TEAMPULSE_MFA=leaders makes it required.")
+    c[1].metric("Signed-in sessions", m["sessions_active"],
+                help=f"{m['sessions_moved']} ended because they moved to a different browser")
     c[2].metric("Failed sign-ins", m["failed_signins"], help=f"Also {m['failed_reauth']} failed password confirmations")
     c[3].metric("Accounts locked now", m["locked_now"])
     st.subheader("Extra capabilities granted")
@@ -65,19 +67,36 @@ with access:
                      hide_index=True, width="stretch")
 
 with ai:
-    c = st.columns(3)
+    c = st.columns(5)
     c[0].metric("Guardrail detections", sum(g["n"] for g in m["guardrail_hits"]),
                 help="Things the output checks caught or flagged in AI answers")
-    c[1].metric("AI assistant calls", m["mcp_calls"])
-    c[2].metric("AI assistant calls refused", m["mcp_denied"])
+    c[1].metric("Injection attempts isolated", m["injection_flagged"],
+                help="AI requests whose data contained text trying to instruct the AI; it was marked as quoted data")
+    c[2].metric("Personal details kept from the AI", m["pii_redacted"] or 0,
+                help="Email addresses and phone numbers removed before text was sent to an AI provider")
+    c[3].metric("AI assistant calls", m["mcp_calls"])
+    c[4].metric("AI assistant calls refused", m["mcp_denied"])
     if m["guardrail_hits"]:
         st.dataframe(pd.DataFrame(m["guardrail_hits"]).rename(columns={"guard": "Guardrail", "n": "Times"}),
                      hide_index=True, width="stretch")
     st.caption("Chat, issues and pages are passed to the AI as data, never as instructions; no AI can change the "
                "team's data by itself; and secrets are removed before any text leaves for an AI provider.")
+    st.subheader("Source items that try to instruct the AI")
+    st.caption("Messages, issues or pages containing text like “ignore previous instructions”. They stay in the data (a "
+               "teammate may be quoting one), but the AI is told to treat them as quotes. Worth a look.")
+    if not m["injection_sources"]:
+        st.caption("None found.")
+    for item in m["injection_sources"]:
+        st.markdown(ui.row(f"{ui.e(item['author_name'] or '')}: {ui.e((item['title'] or item['body'] or '')[:120])}",
+                           ui.e(", ".join(item["kinds"])), "warn",
+                           f"{ui.e(item['source'])} · {ui.e((item['created_at'] or '')[:10])} · "
+                           f"<a href='{ui.url(item['url'])}' target='_blank' rel='noopener noreferrer'>open</a>"),
+                    unsafe_allow_html=True)
 
 with data:
-    c = st.columns(3)
+    c = st.columns(4)
+    c[3].metric("Report approvals lapsed", m["approvals_lapsed"],
+                help="Approved contribution reports whose evidence changed afterwards; the person is asked to look again")
     c[0].metric("People who left Discord opt-in", m["opted_out"])
     c[1].metric("Their messages still stored", m["opted_out_messages_left"],
                 help="Should always be 0: leaving deletes their messages and every copy made from them")

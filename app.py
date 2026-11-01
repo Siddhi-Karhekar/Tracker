@@ -21,9 +21,9 @@ actor = webapp.current_actor(agent.conn)
 if actor is None:
     st.navigation([st.Page("views/login.py", title="Sign in", icon=":material/login:")], position="hidden").run()
     st.stop()
-if actor.must_change:
-    st.navigation([st.Page("views/account.py", title="Choose your password", icon=":material/key:")],
-                  position="hidden").run()
+if actor.must_change or actor.needs_mfa:
+    title = "Choose your password" if actor.must_change else "Set up two-factor sign-in"
+    st.navigation([st.Page("views/account.py", title=title, icon=":material/key:")], position="hidden").run()
     st.stop()
 
 PAGES = {   # key: (file, title, icon, group)

@@ -27,6 +27,25 @@ with left:
                 webapp.demo_sign_in(conn, username)
                 st.rerun()
 
+    if st.session_state.get(webapp.PENDING_KEY):
+        with st.form("code"):
+            st.markdown("**Two-factor sign-in.** Enter the 6-digit code from your authenticator app, or one of your "
+                        "recovery codes.")
+            code = st.text_input("Code", autocomplete="one-time-code", max_chars=12)
+            c1, c2 = st.columns([1, 3])
+            if c1.form_submit_button("Continue", type="primary", icon=":material/verified_user:"):
+                try:
+                    webapp.finish_sign_in(conn, code)
+                    st.rerun()
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+                    if "took too long" in str(exc) or "Too many" in str(exc):
+                        st.session_state.pop(webapp.PENDING_KEY, None)
+            if c2.form_submit_button("Start again"):
+                st.session_state.pop(webapp.PENDING_KEY, None)
+                st.rerun()
+        st.stop()
+
     with st.form("sign-in"):
         username = st.text_input("Username", autocomplete="username", max_chars=64)
         password = st.text_input("Password", type="password", autocomplete="current-password", max_chars=128)
@@ -36,6 +55,8 @@ with left:
             else:
                 try:
                     webapp.sign_in(conn, username, password)
+                    st.rerun()
+                except auth.MFARequired:
                     st.rerun()
                 except auth.AuthError as exc:
                     st.error(str(exc))

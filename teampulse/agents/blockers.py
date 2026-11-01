@@ -91,7 +91,7 @@ class BlockerAgent:
     def collect_for(self, types: list[str], days: int, limit: int = MAX_SIGNALS) -> dict:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         rows = self.conn.execute(
-            f"SELECT s.*, e.created_at AS at FROM signals s JOIN events e ON e.id = s.event_id "
+            f"SELECT s.*, e.created_at AS at FROM signals s JOIN events e ON e.id = s.event_id "  # nosec B608  # only ? placeholders
             f"WHERE s.type IN ({','.join('?' * len(types))}) AND e.created_at >= ? "
             f"ORDER BY s.resolved, e.created_at DESC LIMIT ?", [*types, since, limit]).fetchall()
 

@@ -20,10 +20,10 @@ jobs:
       TEAMPULSE_EMBEDDER: hash     # offline tests: no model download, no API keys
       LLM_PROVIDERS: "off"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -47,19 +47,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           persist-credentials: false
           fetch-depth: 0          # the whole history, so an old commit can't hide a key
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
       - name: Secret scan (files and full history)
         run: python scripts/scan_secrets.py
       - name: Authorization coverage
         run: |
-          pip install -r requirements.lock
+          pip install -r requirements.lock bandit==1.9.4 cyclonedx-bom==7.6.0
           python -c "from teampulse import security; c = security.authorization_coverage(); print(f\"{c['covered']}/{c['functions']} actions checked\"); raise SystemExit(1 if c['unchecked'] else 0)"
+      - name: Static security analysis (Bandit, medium severity and above)
+        # Every reviewed exception is marked inline with "# nosec <rule>  # <reason>"; anything new fails.
+        run: bandit -q -r teampulse views app.py -ll
+      - name: Software bill of materials (CycloneDX)
+        run: cyclonedx-py requirements requirements.lock --of JSON -o sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
 
   windows:
     # Many students run TeamPulse on Windows; the lock file must install and the tests must pass there too.
@@ -70,10 +79,10 @@ jobs:
       LLM_PROVIDERS: "off"
       PYTHONUTF8: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -89,10 +98,10 @@ jobs:
       TEAMPULSE_E2E: "1"
       TEAMPULSE_E2E_SHOTS: e2e-screenshots
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -101,7 +110,7 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: python -m pytest -q tests/e2e --tb=short   # failures show as annotations on the run
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: e2e-screenshots
           path: e2e-screenshots
@@ -112,10 +121,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
       - run: pip install -r requirements-eval.txt pytest python-dotenv

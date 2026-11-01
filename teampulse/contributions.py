@@ -15,6 +15,8 @@ Design principles (say these in your report and viva):
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -73,12 +75,73 @@ def get_review(conn, name: str) -> dict | None:
     return dict(row) if row else None
 
 
-def set_review(conn, name: str, status: str, comment: str = "") -> None:
+def set_review(conn, name: str, status: str, comment: str = "", snapshot: dict | None = None) -> None:
+    """status: approved | disputed. An approval stores a snapshot of the evidence the person saw."""
     if status not in ("approved", "disputed"):
         raise ValueError(f"Unknown review status: {status!r}")
     with conn:
-        conn.execute("INSERT OR REPLACE INTO contribution_reviews VALUES (?, ?, ?, ?)",
-                     (name, status, comment.strip() or None, utc_now()))
+        conn.execute("INSERT OR REPLACE INTO contribution_reviews (member, status, comment, updated_at, evidence_hash) "
+                     "VALUES (?, ?, ?, ?, ?)", (name, status, comment.strip() or None, utc_now(),
+                                                json.dumps(snapshot) if snapshot and status == "approved" else None))
+
+
+# ---- integrity: an approval covers the evidence that was approved ---------------------------------------------
+# Nobody (a leader correcting a chat link, a source being edited) can change what a report says about a person after
+# they approved it without the approval lapsing: they're asked to look again, and the team doesn't see it meanwhile.
+# New work arriving is not a change; evidence the person saw being edited, removed or re-linked is.
+
+def _digest(*parts) -> str:
+    return hashlib.sha256(json.dumps(parts, ensure_ascii=False, default=str).encode()).hexdigest()[:20]
+
+
+def evidence_snapshot(conn, member: Member) -> dict:
+    report = build_report(conn, member)
+    stamps = {r[0]: r[1] for r in conn.execute("SELECT id, COALESCE(updated_at, created_at) FROM events")}
+    items = {i["event_id"]: _digest(i["label"], i["task"], stamps.get(i["event_id"]))
+             for group in report.items.values() for i in group}
+    claims = {c["event_id"]: _digest(c.get("verdict"), c.get("task")) for c in report.claims}
+    return {"items": items, "claims": claims}
+
+
+def integrity(conn, member: Member) -> dict:
+    """Does the approved report still match the evidence it was approved on?"""
+    review = get_review(conn, member.name)
+    if not review or review["status"] != "approved" or not review.get("evidence_hash"):
+        return {"ok": True, "changed": []}
+    then = json.loads(review["evidence_hash"])
+    now_ = evidence_snapshot(conn, member)
+    alive = {r[0] for r in conn.execute("SELECT id FROM events")}
+    changed = []
+    for event_id, digest in then.get("items", {}).items():
+        if event_id not in alive:
+            changed.append(f"removed: {event_id}")
+        elif event_id in now_["items"] and now_["items"][event_id] != digest:
+            changed.append(f"changed: {event_id}")
+    for event_id, digest in then.get("claims", {}).items():
+        if event_id in now_["claims"] and now_["claims"][event_id] != digest:
+            changed.append(f"claim check changed: {event_id}")
+    return {"ok": not changed, "changed": changed}
+
+
+def refresh_integrity(conn) -> list[str]:
+    """Lapse approvals whose evidence changed: status 'changed', logged once, and the person is told. Returns names."""
+    from teampulse.auth import audit
+    lapsed = []
+    for m in members(conn):
+        result = integrity(conn, m)
+        if result["ok"]:
+            continue
+        with conn:
+            conn.execute("UPDATE contribution_reviews SET status = 'changed', updated_at = ? WHERE member = ?",
+                         (utc_now(), m.name))
+            conn.execute("INSERT OR IGNORE INTO pm_notifications (recipient, text, created_at, dedupe) "
+                         "VALUES (?, ?, ?, ?)", (m.name, "Some evidence in your contribution report changed after you "
+                                                 "approved it. Please look at it again (Contributions page); the team "
+                                                 "won't see it until you do.", utc_now(),
+                                                 f"report_changed:{m.name.lower()}:{utc_now()[:10]}"))
+        audit(conn, None, "contrib.approval_lapsed", m.name, detail="; ".join(result["changed"])[:300])
+        lapsed.append(m.name)
+    return lapsed
 
 
 def visible_to_team(conn, member: Member) -> bool:
@@ -87,7 +150,7 @@ def visible_to_team(conn, member: Member) -> bool:
     if not review_required():
         return True
     review = get_review(conn, member.name)
-    return bool(review) and review["status"] == "approved"
+    return bool(review) and review["status"] == "approved" and integrity(conn, member)["ok"]
 
 
 def _item(row, label: str, task: str | None = None) -> dict:

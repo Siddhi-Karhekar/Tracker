@@ -261,7 +261,8 @@ def seed(path: str) -> tuple[int, Path]:
         # Week 8: every demo member has reviewed their contribution report; Kabir added context.
         notes = {"Kabir": "Most of my recommendation work is in a Colab notebook that isn't in the repo yet; "
                           "I'll push it once we get the canteen data."}
-        conn.executemany("INSERT INTO contribution_reviews VALUES (?, 'approved', ?, ?)",
+        conn.executemany("INSERT INTO contribution_reviews (member, status, comment, updated_at) "
+                         "VALUES (?, 'approved', ?, ?)",
                          [(name, notes.get(name), ago(0.5)) for name in PEOPLE])
         conn.execute("INSERT INTO memory (fact, source, created_at, kind, subject, fact_date, active, created_by) "
                      "VALUES (?, 'user', ?, 'deadline', 'final review', ?, 1, 'Neha')",
@@ -365,8 +366,8 @@ def seed_projects(conn) -> None:
     # has crept from 30% to 80% over nine days while it's due in two.
     with conn:
         for table, col in (("pm_history", "at"), ("pm_comments", "created_at"), ("pm_progress_updates", "created_at")):
-            conn.execute(f"UPDATE {table} SET {col} = ? WHERE task_id = ?", (ago(4), recs))
-            conn.execute(f"UPDATE {table} SET {col} = ? WHERE task_id = ?", (ago(3), history))
+            conn.execute(f"UPDATE {table} SET {col} = ? WHERE task_id = ?", (ago(4), recs))  # nosec B608  # fixed table/column names in a constant tuple
+            conn.execute(f"UPDATE {table} SET {col} = ? WHERE task_id = ?", (ago(3), history))  # nosec B608  # fixed table/column names in a constant tuple
         conn.execute("UPDATE pm_requests SET created_at = ? WHERE task_id = ?", (ago(3), recs))
         conn.execute("UPDATE pm_progress_updates SET created_at = ? WHERE task_id = ? AND kind = 'reported'",
                      (ago(1), payment))

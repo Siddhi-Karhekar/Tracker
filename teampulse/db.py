@@ -357,6 +357,13 @@ CREATE TABLE IF NOT EXISTS pm_source_links (
     linked_by     TEXT,
     linked_at     TEXT NOT NULL
 );
+-- Password accepted, two-factor code still to come: a short-lived token that is NOT a session.
+CREATE TABLE IF NOT EXISTS mfa_pending (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at  TEXT NOT NULL
+);
+
 -- Extra capabilities a leader grants to one member (e.g. co-lead planning). Only permissions in auth.GRANTABLE
 -- count; anything else in this table is ignored, so a tampered row can't make someone an admin.
 CREATE TABLE IF NOT EXISTS user_grants (
@@ -519,6 +526,12 @@ MIGRATIONS = [
     ("sessions", "reauth_at", "TEXT"),                           # security: password re-confirmed in this session
     ("audit_log", "prev_hash", "TEXT"),                          # security: tamper-evident chain
     ("audit_log", "hash", "TEXT"),
+    ("users", "mfa_secret", "TEXT"),                             # security: TOTP two-factor sign-in
+    ("users", "mfa_enabled_at", "TEXT"),
+    ("users", "mfa_last_step", "INTEGER"),                       # a code can't be used twice
+    ("users", "mfa_recovery", "TEXT"),                           # JSON list of hashed one-time recovery codes
+    ("sessions", "user_agent", "TEXT"),                          # the browser a session started in
+    ("contribution_reviews", "evidence_hash", "TEXT"),           # security: approval bound to the evidence seen
 ]
 
 
@@ -538,7 +551,7 @@ def upsert_event(conn: sqlite3.Connection, event: Event) -> None:
     cols = ", ".join(EVENT_COLUMNS)
     marks = ", ".join(f":{c}" for c in EVENT_COLUMNS)
     updates = ", ".join(f"{c}=excluded.{c}" for c in EVENT_COLUMNS if c != "id")
-    conn.execute(f"INSERT INTO events ({cols}) VALUES ({marks}) ON CONFLICT(id) DO UPDATE SET {updates}", row)
+    conn.execute(f"INSERT INTO events ({cols}) VALUES ({marks}) ON CONFLICT(id) DO UPDATE SET {updates}", row)  # nosec B608  # fixed names (EVENT_COLUMNS / DERIVED_TABLES) and ? placeholders
 
 
 def upsert_events(conn: sqlite3.Connection, events) -> int:
@@ -565,8 +578,8 @@ def _delete_with_copies(conn: sqlite3.Connection, ids: list[str]) -> int:
         chunk = ids[i:i + 500]
         marks = ",".join("?" * len(chunk))
         for table in DERIVED_TABLES:
-            conn.execute(f"DELETE FROM {table} WHERE event_id IN ({marks})", chunk)
-        removed += conn.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk).rowcount
+            conn.execute(f"DELETE FROM {table} WHERE event_id IN ({marks})", chunk)  # nosec B608  # fixed names (EVENT_COLUMNS / DERIVED_TABLES) and ? placeholders
+        removed += conn.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk).rowcount  # nosec B608  # fixed names (EVENT_COLUMNS / DERIVED_TABLES) and ? placeholders
         for event_id in chunk:               # conflicts that quote the message; rebuilt on the next comparison
             conn.execute("DELETE FROM discrepancies WHERE instr(sides, ?) > 0", (f'"{event_id}"',))
     return removed

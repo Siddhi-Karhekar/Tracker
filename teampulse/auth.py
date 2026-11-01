@@ -92,6 +92,14 @@ class AuthError(Exception):
     """A sign-in or account problem with a message that is safe to show the user."""
 
 
+class MFARequired(AuthError):
+    """The password was right; now the two-factor code. Carries a short-lived pending token, not a session."""
+
+    def __init__(self, pending: str):
+        super().__init__("Enter the 6-digit code from your authenticator app.")
+        self.pending = pending
+
+
 class PermissionDenied(Exception):
     """The signed-in user's role doesn't allow this action."""
 
@@ -106,6 +114,7 @@ class Actor:
     must_change: bool = False
     grants: frozenset = frozenset()     # extra capabilities from user_grants, loaded on every request
     session: str | None = None          # hash of the session token (None: AI-assistant token, CLI, local mode)
+    needs_mfa: bool = False             # two-factor is required for them and not set up yet: they get nothing else
 
     @property
     def is_leader(self) -> bool:
@@ -217,7 +226,7 @@ def seal_audit(conn) -> int:
         head = conn.execute("SELECT value FROM settings WHERE key = 'audit:head'").fetchone()
         last = conn.execute("SELECT hash FROM audit_log WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
         prev = json.loads(head[0])["hash"] if head else (last[0] if last else "genesis")
-        rows = conn.execute(f"SELECT id, {', '.join(AUDIT_FIELDS)} FROM audit_log WHERE hash IS NULL ORDER BY id"
+        rows = conn.execute(f"SELECT id, {', '.join(AUDIT_FIELDS)} FROM audit_log WHERE hash IS NULL ORDER BY id"  # nosec B608  # fixed column list AUDIT_FIELDS
                             ).fetchall()
         for r in rows:
             h = _digest(prev, r)
@@ -236,7 +245,7 @@ def seal_audit(conn) -> int:
 def verify_audit(conn) -> dict:
     """Recompute the chain. The first entry still kept (older ones may be removed by retention) anchors it."""
     seal_audit(conn)
-    rows = conn.execute(f"SELECT id, prev_hash, hash, {', '.join(AUDIT_FIELDS)} FROM audit_log ORDER BY id").fetchall()
+    rows = conn.execute(f"SELECT id, prev_hash, hash, {', '.join(AUDIT_FIELDS)} FROM audit_log ORDER BY id").fetchall()  # nosec B608  # fixed column list AUDIT_FIELDS
     if not rows:
         return {"ok": True, "checked": 0}
     prev = rows[0]["prev_hash"]
@@ -265,9 +274,19 @@ def _grants(conn, user_id: str) -> frozenset:
                      if r[0] in GRANTABLE)
 
 
+def _needs_mfa(row) -> bool:
+    from teampulse import mfa
+    try:
+        enrolled = bool(row["mfa_enabled_at"])
+    except (IndexError, KeyError):
+        enrolled = False
+    return mfa.required_for(row["role"]) and not enrolled
+
+
 def _row_actor(row: sqlite3.Row, conn=None) -> Actor:
     return Actor(row["id"], row["username"], row["display_name"], row["role"], row["member_name"],
-                 bool(row["must_change"]), _grants(conn, row["id"]) if conn is not None else frozenset())
+                 bool(row["must_change"]), _grants(conn, row["id"]) if conn is not None else frozenset(),
+                 needs_mfa=_needs_mfa(row))
 
 
 def suggest_username(conn: sqlite3.Connection, display_name: str) -> str:
@@ -389,7 +408,7 @@ def _record_failure(conn, key: str) -> bool:
     return True
 
 
-def login(conn, username: str, password: str) -> tuple[str, Actor]:
+def login(conn, username: str, password: str, user_agent: str | None = None) -> tuple[str, Actor]:
     """Returns (session token, actor) or raises AuthError with a safe, specific message."""
     key = _throttle_key(username)
     _check_lock(conn, key)
@@ -407,20 +426,26 @@ def login(conn, username: str, password: str) -> tuple[str, Actor]:
     if not user["active"]:
         audit(conn, _row_actor(user), "auth.login", key, "denied", "deactivated")
         raise AuthError("This account is deactivated. Ask your team leader to reactivate it.")
+    if user["mfa_enabled_at"]:   # second step: no session until the code is right
+        from teampulse import mfa
+        audit(conn, _row_actor(user), "auth.login_password", key, detail="waiting for two-factor code")
+        raise MFARequired(mfa.start_pending(conn, user["id"]))
     with conn:
         conn.execute("DELETE FROM login_throttle WHERE key = ?", (key,))
-    token = _issue_session(conn, user["id"])
+    token = _issue_session(conn, user["id"], user_agent)
     actor = replace(_row_actor(user, conn), session=_token_hash(token))
     audit(conn, actor, "auth.login", key)
     return token, actor
 
 
-def _issue_session(conn, user_id: str) -> str:
+def _issue_session(conn, user_id: str, user_agent: str | None = None) -> str:
     token = secrets.token_urlsafe(32)
     stamp = now()
     with conn:
-        conn.execute("INSERT INTO sessions (token_hash, user_id, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?)",
-                     (_token_hash(token), user_id, iso(stamp), iso(stamp), iso(stamp + timedelta(hours=session_hours()))))
+        conn.execute("INSERT INTO sessions (token_hash, user_id, created_at, last_seen, expires_at, user_agent) "
+                     "VALUES (?, ?, ?, ?, ?, ?)",
+                     (_token_hash(token), user_id, iso(stamp), iso(stamp), iso(stamp + timedelta(hours=session_hours())),
+                      (user_agent or "")[:300] or None))
         conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (iso(stamp), user_id))
         conn.execute("DELETE FROM sessions WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)",
                      (iso(stamp), iso(stamp - timedelta(days=7))))
@@ -440,21 +465,45 @@ def demo_session(conn, username: str) -> tuple[str, Actor]:
     return token, actor
 
 
-def resolve(conn, token: str | None) -> Actor | None:
-    """The signed-in user for this token, or None if missing, expired, idle too long, revoked or deactivated."""
+def resolve(conn, token: str | None, user_agent: str | None = None) -> Actor | None:
+    """The signed-in user for this token, or None if missing, expired, idle too long, revoked or deactivated.
+    If the session suddenly comes from a different browser, it is ended (fail closed) and logged."""
     if not token:
         return None
-    row = conn.execute("SELECT s.*, u.username, u.display_name, u.role, u.member_name, u.must_change, u.active "
-                       "FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
+    row = conn.execute("SELECT s.*, u.username, u.display_name, u.role, u.member_name, u.must_change, u.active, "
+                       "u.mfa_enabled_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
                        (_token_hash(token),)).fetchone()
     stamp = now()
     if row is None or row["revoked_at"] or not row["active"] or row["expires_at"] < iso(stamp) or \
             datetime.fromisoformat(row["last_seen"]) < stamp - timedelta(minutes=idle_minutes()):
         return None
+    if user_agent and row["user_agent"] and user_agent[:300] != row["user_agent"]:
+        with conn:
+            conn.execute("UPDATE sessions SET revoked_at = ? WHERE token_hash = ?", (iso(stamp), row["token_hash"]))
+        audit(conn, Actor(row["user_id"], row["username"], row["display_name"], row["role"]), "auth.session_moved",
+              row["username"], "denied", "session used from a different browser; ended")
+        return None
     with conn:
         conn.execute("UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (iso(stamp), row["token_hash"]))
     return Actor(row["user_id"], row["username"], row["display_name"], row["role"], row["member_name"],
-                 bool(row["must_change"]), _grants(conn, row["user_id"]), row["token_hash"])
+                 bool(row["must_change"]), _grants(conn, row["user_id"]), row["token_hash"], _needs_mfa(row))
+
+
+def list_sessions(conn, actor: Actor) -> list[dict]:
+    """Your own signed-in sessions (devices), newest first. The token itself is never shown."""
+    rows = conn.execute("SELECT rowid AS id, token_hash, created_at, last_seen, user_agent FROM sessions "
+                        "WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY last_seen DESC",
+                        (actor.id, iso(now()))).fetchall()
+    return [{**{k: r[k] for k in ("id", "created_at", "last_seen", "user_agent")},
+             "current": r["token_hash"] == actor.session} for r in rows]
+
+
+def revoke_session(conn, actor: Actor, session_id: int) -> None:
+    """End one of your own sessions."""
+    with conn:
+        n = conn.execute("UPDATE sessions SET revoked_at = ? WHERE rowid = ? AND user_id = ? AND revoked_at IS NULL",
+                         (iso(now()), int(session_id), actor.id)).rowcount
+    audit(conn, actor, "auth.revoke_session", actor.username, "ok" if n else "denied")
 
 
 # ---- re-authentication for high-impact actions ------------------------------------------------------------
@@ -462,14 +511,17 @@ def resolve(conn, token: str | None) -> Actor | None:
 REAUTH_MINUTES = 10
 
 
-def confirm_password(conn, actor: Actor, password: str) -> None:
-    """"Confirm it's you": marks this session (only this one) as recently authenticated. Throttled like sign-in."""
+def confirm_password(conn, actor: Actor, password: str, code: str | None = None) -> None:
+    """"Confirm it's you": marks this session (only this one) as recently authenticated. Throttled like sign-in.
+    With two-factor on, the code is needed too."""
     if actor is None or not actor.session:
         raise AuthError("Sign in again to do this.")
     key = _throttle_key(actor.username)
     _check_lock(conn, key)
     user = get_user(conn, actor.id)
-    if user is None or not verify_password(password or "", user["password_hash"]):
+    from teampulse import mfa
+    second = not user or not user["mfa_enabled_at"] or mfa.check_code(conn, actor.id, code or "")
+    if user is None or not verify_password(password or "", user["password_hash"]) or not second:
         locked = _record_failure(conn, key)
         audit(conn, actor, "auth.reauth", actor.username, "failed", "locked" if locked else "")
         raise AuthError("That password isn't right." + (f" Try again in {LOCK_MINUTES} minutes." if locked else ""))
@@ -553,7 +605,8 @@ def resolve_api_token(conn, token: str | None) -> tuple[Actor, str] | None:
     row = conn.execute("SELECT t.id AS token_id, t.scope, t.expires_at, t.revoked_at, t.last_used, u.* "
                        "FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?",
                        (_token_hash(str(token)),)).fetchone()
-    if row is None or row["revoked_at"] or row["expires_at"] <= iso(now()) or not row["active"] or row["must_change"]:
+    if row is None or row["revoked_at"] or row["expires_at"] <= iso(now()) or not row["active"] or row["must_change"] \
+            or _needs_mfa(row):
         return None
     if not row["last_used"] or row["last_used"] < iso(now() - timedelta(minutes=1)):   # at most one write a minute
         with conn:
@@ -638,8 +691,9 @@ def public_demo() -> bool:
 
 
 def can(actor: Actor | None, permission: str) -> bool:
-    """Deny by default: an unknown permission, no account, or an account that must change its password gets nothing."""
-    if actor is None or actor.must_change or permission not in PERMISSIONS:
+    """Deny by default: an unknown permission, no account, an account that must change its password, or a leader who
+    must set up two-factor sign-in first gets nothing."""
+    if actor is None or actor.must_change or actor.needs_mfa or permission not in PERMISSIONS:
         return False
     if permission in DEMO_LOCKED and public_demo():
         return False
@@ -701,7 +755,7 @@ def member_pages(conn) -> list[str]:
 
 
 def page_allowed(conn, actor: Actor | None, page: str) -> bool:
-    if actor is None or actor.must_change:
+    if actor is None or actor.must_change or actor.needs_mfa:
         return False
     if page in PERSONAL_PAGES:
         return True
@@ -775,6 +829,8 @@ def main():
         with conn:
             conn.execute("UPDATE users SET password_hash = ?, must_change = 1 WHERE id = ?", (hash_password(password), user["id"]))
             conn.execute("DELETE FROM login_throttle WHERE key = ?", (user["username"],))
+        from teampulse import mfa
+        mfa.clear(conn, user["id"])
         revoke_all(conn, user["id"])
         audit(conn, None, "account.reset_cli", user["username"])
         print(f"New one-time password for {user['username']}: {password}")

@@ -17,7 +17,7 @@ from datetime import timedelta
 from teampulse.auth import iso, now
 
 MODULES = ["teampulse.actions", "teampulse.pm", "teampulse.pm_sync", "teampulse.pm_ai", "teampulse.pm_monitor",
-           "teampulse.auth", "teampulse.mcp_tools"]
+           "teampulse.auth", "teampulse.mcp_tools", "teampulse.mfa"]
 CHECKS = {"require", "authorize", "_require_work", "require_recent_auth", "guard"}
 # The policy itself (these *are* the checks) and read-only helpers that answer "may they?".
 PRIMITIVES = {"can", "authorize", "require", "page_allowed", "require_recent_auth", "recently_authenticated", "audit",
@@ -30,6 +30,10 @@ SELF_SCOPED = {
     "list_api_tokens": "lists the caller's own tokens; everyone's only with users.manage",
     "change_password": "the caller's own password, after checking the current one",
     "confirm_password": "the caller's own session, after checking their password",
+    "list_sessions": "lists only the caller's own sessions",
+    "revoke_session": "ends only the caller's own sessions (the query is scoped to their user id)",
+    "enable": "two-factor for the caller only, after checking their password and a code",
+    "disable": "two-factor for the caller only, after checking their password and a code",
 }
 # MCP tools run only through mcp_server.call(), which runs mcp_tools.guard() first (checked separately below).
 MCP_GUARDED = "mcp_tools"
@@ -119,9 +123,9 @@ def metrics(conn, days: int = 30) -> dict:
     m["locked_now"] = _count(conn, "SELECT COUNT(*) FROM login_throttle WHERE locked_until > ?", (stamp,))
     marks = ",".join("?" * len(PRIVILEGED))
     m["privileged_changes"] = [dict(r) for r in conn.execute(
-        f"SELECT at, actor_name, action, target, detail FROM audit_log WHERE action IN ({marks}) AND outcome = 'ok' "
+        f"SELECT at, actor_name, action, target, detail FROM audit_log WHERE action IN ({marks}) AND outcome = 'ok' "  # nosec B608  # only ? placeholders
         "AND at >= ? ORDER BY id DESC LIMIT 20", (*PRIVILEGED, since))]
-    m["privileged_count"] = _count(conn, f"SELECT COUNT(*) FROM audit_log WHERE action IN ({marks}) AND outcome = 'ok' "
+    m["privileged_count"] = _count(conn, f"SELECT COUNT(*) FROM audit_log WHERE action IN ({marks}) AND outcome = 'ok' "  # nosec B608  # only ? placeholders
                                          "AND at >= ?", (*PRIVILEGED, since))
     m["sessions_active"] = _count(conn, "SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > ?",
                                   (stamp,))
@@ -144,6 +148,19 @@ def metrics(conn, days: int = 30) -> dict:
         "GROUP BY action ORDER BY n DESC", (since,))]
     m["secrets_redacted"] = _count(conn, "SELECT SUM(CAST(detail AS INTEGER)) FROM audit_log "
                                          "WHERE action = 'security.secret_redacted' AND at >= ?", (since,))
+    m["pii_redacted"] = _count(conn, "SELECT SUM(CAST(detail AS INTEGER)) FROM audit_log "
+                                     "WHERE action = 'security.pii_redacted' AND at >= ?", (since,))
+    m["injection_flagged"] = _count(conn, "SELECT COUNT(*) FROM audit_log WHERE action = 'security.injection_flagged' "
+                                          "AND at >= ?", (since,))
+    from teampulse import injection
+    m["injection_sources"] = injection.flagged_sources(conn, days)
+    m["mfa_leaders"] = _count(conn, "SELECT COUNT(*) FROM users WHERE role = 'leader' AND active = 1 "
+                                    "AND mfa_enabled_at IS NOT NULL")
+    m["mfa_users"] = _count(conn, "SELECT COUNT(*) FROM users WHERE active = 1 AND mfa_enabled_at IS NOT NULL")
+    m["sessions_moved"] = _count(conn, "SELECT COUNT(*) FROM audit_log WHERE action = 'auth.session_moved' AND at >= ?",
+                                 (since,))
+    m["approvals_lapsed"] = _count(conn, "SELECT COUNT(*) FROM audit_log WHERE action = 'contrib.approval_lapsed' "
+                                         "AND at >= ?", (since,))
     m["secrets_in_log"] = sum(1 for r in conn.execute("SELECT target, detail FROM audit_log")
                               if SECRET.search(f"{r[0] or ''} {r[1] or ''}"))
     left = [r[0] for r in conn.execute("SELECT discord_id FROM members WHERE consent = 0 AND discord_id IS NOT NULL")]
