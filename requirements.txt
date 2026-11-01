@@ -1,5 +1,5 @@
 # Week 2: ingestion
-discord.py>=2.4
+discord.py>=2.7.1
 requests>=2.31
 python-dotenv>=1.0
 
