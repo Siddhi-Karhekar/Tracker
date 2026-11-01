@@ -1,23 +1,23 @@
 # Week 2: ingestion
-discord.py>=2.4
-requests>=2.31
-python-dotenv>=1.0
+discord.py>=2.7.1
+requests>=2.34.2
+python-dotenv>=1.2.4
 
 # Week 3: retrieval agent + app
-chromadb>=1.0
-fastembed>=0.4                  # multilingual embeddings via ONNX: small, no PyTorch
+chromadb>=1.5.9
+fastembed>=0.9.1                  # multilingual embeddings via ONNX: small, no PyTorch
 # Optional, heavier (~2 GB with PyTorch): pip install sentence-transformers
 # and set TEAMPULSE_EMBEDDER=intfloat/multilingual-e5-small
-langgraph>=1.0
-openai>=1.40                    # client for Groq / Gemini / Ollama OpenAI-compatible APIs
-streamlit>=1.50                 # st.navigation, st.pills, width="stretch"
+langgraph>=1.2.18
+openai>=3.41.0                    # client for Groq / Gemini / Ollama OpenAI-compatible APIs
+streamlit>=1.66.1                 # st.navigation, st.pills, width="stretch"
 
 # Week 4: tracing (optional; the Phoenix UI itself is `pip install arize-phoenix`)
-arize-phoenix-otel>=0.9
-openinference-instrumentation-langchain>=0.1
-openinference-instrumentation-openai>=0.1
+arize-phoenix-otel>=0.17.2
+openinference-instrumentation-langchain>=0.1.80
+openinference-instrumentation-openai>=0.1.66
 
 # TeamPulse 2.0: MCP server for AI assistants (python -m teampulse.mcp_server)
 mcp>=2.3
 
-pytest>=8.0
+pytest>=9.2.0
