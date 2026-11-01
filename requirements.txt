@@ -9,7 +9,7 @@ fastembed>=0.4                  # multilingual embeddings via ONNX: small, no Py
 # Optional, heavier (~2 GB with PyTorch): pip install sentence-transformers
 # and set TEAMPULSE_EMBEDDER=intfloat/multilingual-e5-small
 langgraph>=1.0
-openai>=1.40                    # client for Groq / Gemini / Ollama OpenAI-compatible APIs
+openai>=3.41.0                    # client for Groq / Gemini / Ollama OpenAI-compatible APIs
 streamlit>=1.50                 # st.navigation, st.pills, width="stretch"
 
 # Week 4: tracing (optional; the Phoenix UI itself is `pip install arize-phoenix`)

@@ -3,4 +3,4 @@
 # Tested 28 Oct 2026. ragas 0.4.3 imports a module that langchain-community 0.4 removed, hence the pin.
 ragas==0.4.3
 langchain-community>=0.3.29,<0.4
-openai>=1.40,<2
+openai>=3.41.0,<4
