@@ -1,7 +1,7 @@
 """Blockers: what people said they're stuck on or waiting for in chat, linked to the task it's about."""
 import streamlit as st
 
-from teampulse import actions, auth, signals, ui
+from teampulse import actions, auth, queries, signals, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("blockers")
@@ -43,7 +43,7 @@ data = agent.blockers.collect_for(types, int(days), limit=200)
 items = [i for i in data["items"] if show_resolved or not i["state"].startswith(("resolved", "possibly"))]
 
 if not items:
-    total = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    total = queries.signal_count(conn)
     if total:
         ui.empty("Nothing here.", "No messages of these kinds in this period.")
     else:

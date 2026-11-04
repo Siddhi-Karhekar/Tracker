@@ -1,7 +1,7 @@
 """Team memory: facts the team asked TeamPulse to remember, re-checked against live data every time."""
 import streamlit as st
 
-from teampulse import actions, auth, memory, ui
+from teampulse import actions, auth, memory, queries, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("memory")
@@ -39,7 +39,7 @@ for m in items:
         actions.forget_memory(conn, actor, m["id"])
         st.rerun()
 
-old = conn.execute("SELECT fact, created_at FROM memory WHERE active = 0 ORDER BY created_at DESC LIMIT 20").fetchall()
+old = queries.forgotten_facts(conn, limit=20)
 if old:
     with st.expander(f"Forgotten or replaced ({len(old)})"):
         for r in old:

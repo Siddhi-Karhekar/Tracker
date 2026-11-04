@@ -17,7 +17,7 @@ from datetime import timedelta
 from teampulse.auth import iso, now
 
 MODULES = ["teampulse.actions", "teampulse.pm", "teampulse.pm_sync", "teampulse.pm_ai", "teampulse.pm_monitor",
-           "teampulse.auth", "teampulse.mcp_tools", "teampulse.mfa"]
+           "teampulse.auth", "teampulse.api_tokens", "teampulse.grants", "teampulse.mcp_tools", "teampulse.mfa"]
 CHECKS = {"require", "authorize", "_require_work", "require_recent_auth", "guard"}
 # The policy itself (these *are* the checks) and read-only helpers that answer "may they?".
 PRIMITIVES = {"can", "authorize", "require", "page_allowed", "require_recent_auth", "recently_authenticated", "audit",

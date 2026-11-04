@@ -1,7 +1,7 @@
 """Conflicts: where GitHub, Notion and chat disagree about a task, most serious first."""
 import streamlit as st
 
-from teampulse import actions, auth, discrepancies as disc, ui
+from teampulse import actions, auth, discrepancies as disc, queries, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("conflicts")
@@ -15,7 +15,7 @@ TYPE_LABEL = {"status": "Status", "stale_plan": "Notion is behind", "owner": "Ow
 ui.header("Where your sources disagree", "Tasks marked done that aren't, people assigned who aren't doing the "
           "work, dates that don't match, and plans that later decisions have overtaken.")
 
-last = conn.execute("SELECT MAX(last_seen) FROM discrepancies").fetchone()[0]
+last = queries.conflicts_compared_at(conn)
 can_edit = auth.can(actor, "data.edit")
 with st.sidebar:
     st.caption(f"Last compared {ui.ago(last)}.")

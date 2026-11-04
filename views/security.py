@@ -3,7 +3,7 @@ log, the database or the code when the page opens."""
 import pandas as pd
 import streamlit as st
 
-from teampulse import security, ui
+from teampulse import queries, security, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("security")
@@ -125,10 +125,6 @@ with code:
 
 with log:
     outcome = st.segmented_control("Show", ["all", "denied", "failed"], default="all")
-    sql, params = "SELECT at, actor_name, action, target, outcome, detail FROM audit_log", []
-    if outcome in ("denied", "failed"):
-        sql += " WHERE outcome = ?"
-        params.append(outcome)
-    rows = [dict(r) for r in conn.execute(sql + " ORDER BY id DESC LIMIT 300", params)]
+    rows = queries.activity_log(conn, outcome if outcome in ("denied", "failed") else None, limit=300)
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     st.caption("Passwords and message text are never logged. The newest 300 entries are shown.")

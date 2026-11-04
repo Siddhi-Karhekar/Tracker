@@ -1,12 +1,12 @@
 """My work: each person's own workspace. Leaders can open anyone's; members see only their own."""
 import streamlit as st
 
-from teampulse import pm, pm_ai, pm_monitor, pm_ui, ui
+from teampulse import pm, pm_ai, pm_monitor, pm_ui, queries, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("workspace")
 conn = get_agent().conn
-if not conn.execute("SELECT 1 FROM sync_state WHERE key = 'tasks:refreshed_at'").fetchone():
+if not queries.tasks_refreshed_at(conn):
     from teampulse import actions   # first open of a new database: read GitHub/Notion tasks once (Home does too)
     with st.spinner("Reading GitHub and Notion tasks for the first time…"):
         actions.first_build(conn, get_agent().index, get_agent().llm)

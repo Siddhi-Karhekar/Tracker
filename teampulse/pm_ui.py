@@ -13,7 +13,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from teampulse import auth, pm, pm_ai, pm_monitor, pm_sync, ui
+from teampulse import auth, pm, pm_ai, pm_monitor, pm_sync, queries, ui
 from teampulse.auth import Actor
 
 STATUS_TONE = {"backlog": "quiet", "todo": "quiet", "in_progress": "info", "review": "info", "blocked": "bad",
@@ -251,7 +251,7 @@ def _link_picker(conn, actor: Actor, t: dict) -> None:
         if st.button(f"Link to “{s['title']}”" + (f" (#{s['github_number']})" if s["github_number"] else ""),
                      key=f"suggest-{t['id']}-{s['id']}", icon=":material/link:"):
             _do(lambda s=s: pm_sync.link(conn, actor, t["id"], s["id"]), "Linked.")
-    taken = {r[0] for r in conn.execute("SELECT source_task FROM pm_source_links")}
+    taken = queries.linked_source_tasks(conn)
     options = {s["id"]: (f"#{s['github_number']} " if s["github_number"] else "Notion: ") + (s["title"] or s["id"])
                for s in pm_sync.source_tasks(conn) if s["id"] not in taken}
     if not options:

@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import actions, auth, claims, ui
+from teampulse import actions, auth, claims, queries, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("tasks")
@@ -12,7 +12,7 @@ conn = agent.conn
 ui.header("Tasks", "One row per piece of work, merged from GitHub issues and Notion tasks, with what each source "
           "says about it and everything linked to it.")
 
-refreshed = (conn.execute("SELECT value FROM sync_state WHERE key = 'tasks:refreshed_at'").fetchone() or [None])[0]
+refreshed = queries.tasks_refreshed_at(conn)
 can_edit = auth.can(actor, "data.edit")
 with st.sidebar:
     st.caption(f"Tasks rebuilt {ui.ago(refreshed)}.")
@@ -75,17 +75,14 @@ with overview:
             facts = []
             for attr in ("status", "owner", "deadline"):
                 for source, c in card[attr].items():
-                    ev = conn.execute("SELECT url FROM events WHERE id = ?", (c["event_id"],)).fetchone()
-                    link = f" <a href='{ui.url(ev['url'])}' target='_blank'>source</a>" if ev and ev["url"] else ""
+                    src = queries.event_url(conn, c["event_id"])
+                    link = f" <a href='{ui.url(src)}' target='_blank'>source</a>" if src else ""
                     value = ui.status_pill(c["value"]) if attr == "status" else f"<b>{ui.e(c['value'])}</b>"
                     facts.append(f"<tr><td class='tp-meta'>{attr.title()}</td><td>{ui.source_mark(source)}</td>"
                                  f"<td>{value}</td><td class='tp-meta'>{ui.e((c['observed_at'] or '')[:10])}{link}</td></tr>")
             if facts:
                 st.markdown(f"<table class='tp-strip'>{''.join(facts)}</table>", unsafe_allow_html=True)
-            items = conn.execute(
-                "SELECT tl.role, tl.method, e.source, e.title, e.body, e.url, e.author_name, e.updated_at "
-                "FROM task_links tl JOIN events e ON e.id = tl.event_id WHERE tl.task_id = ? ORDER BY e.updated_at DESC",
-                (card["id"],)).fetchall()
+            items = queries.task_items(conn, card["id"])
             st.markdown(f"<p class='tp-meta'>{len(items)} linked items</p>", unsafe_allow_html=True)
             st.markdown("".join(
                 ui.row(f"{ui.source_mark(it['source'])} {ui.e(it['role'])}: "
@@ -99,12 +96,9 @@ if links is not None:
                     "over the AI and become the test data for measuring linking accuracy.</p>", unsafe_allow_html=True)
         task_titles = {c["id"]: ((f"#{c['number']} " if c["number"] else "") + c["title"]) for c in cards}
         options = ["(not about a task)"] + list(task_titles)
-        by_primary = {r["primary_event"]: r["id"] for r in conn.execute("SELECT id, primary_event FROM tasks")}
+        by_primary = queries.task_ids_by_primary_event(conn)
         only_unchecked = st.toggle("Only messages nobody has checked", value=True)
-        rows = conn.execute(
-            "SELECT s.event_id, s.type, s.task_id, s.link_method, e.body, e.author_name, e.created_at "
-            "FROM signals s JOIN events e ON e.id = s.event_id WHERE s.type != 'noise' "
-            "ORDER BY e.created_at DESC LIMIT 40").fetchall()
+        rows = queries.recent_chat_signals(conn, limit=40)
         shown = 0
         for r in rows:
             checked = r["link_method"] == "human"

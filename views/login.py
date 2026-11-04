@@ -1,7 +1,7 @@
 """Sign in. Also creates the very first team leader, but only with the setup code from the server's settings."""
 import streamlit as st
 
-from teampulse import auth, config, ui, webapp
+from teampulse import auth, config, queries, ui, webapp
 
 agent = webapp.get_agent()
 conn = agent.conn
@@ -62,7 +62,7 @@ with left:
                     st.error(str(exc))
     st.caption("Forgot your password? Your team leader can issue a new one-time password.")
 
-    has_leader = conn.execute("SELECT 1 FROM users WHERE role = 'leader'").fetchone() is not None
+    has_leader = queries.has_leader(conn)
     if not has_leader and not webapp.public_demo():
         st.divider()
         st.subheader("First time setting up?")

@@ -2,19 +2,19 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import actions, auth, claims, discrepancies as disc, ui
+from teampulse import actions, auth, claims, discrepancies as disc, queries, ui
 from teampulse.webapp import get_agent, require_page
 
 actor = require_page("home")
 agent = get_agent()
 conn = agent.conn
 
-refreshed = (conn.execute("SELECT value FROM sync_state WHERE key = 'tasks:refreshed_at'").fetchone() or [None])[0]
-has_events = conn.execute("SELECT 1 FROM events LIMIT 1").fetchone() is not None
+refreshed = queries.tasks_refreshed_at(conn)
+has_events = queries.has_events(conn)
 if has_events and not refreshed:
     with st.spinner("First look at your data: reading chat, linking tasks, comparing sources…"):
         actions.first_build(conn, agent.index, agent.llm)
-    refreshed = (conn.execute("SELECT value FROM sync_state WHERE key = 'tasks:refreshed_at'").fetchone() or [None])[0]
+    refreshed = queries.tasks_refreshed_at(conn)
 
 if not has_events:
     ui.header("TeamPulse", "See where your team's GitHub, Notion and Discord agree, and where they don't.")
@@ -27,11 +27,7 @@ if not has_events:
 
 # ---- what needs attention -------------------------------------------------------------------------
 conflicts = disc.open_items(conn)
-blockers = conn.execute(
-    "SELECT s.type, s.summary, e.body, e.author_name, e.created_at, e.url, t.title AS task, t.github_number "
-    "FROM signals s JOIN events e ON e.id = s.event_id LEFT JOIN task_links tl ON tl.event_id = s.event_id "
-    "LEFT JOIN tasks t ON t.id = tl.task_id WHERE s.type IN ('blocker','help_request') AND s.resolved = 0 "
-    "AND e.created_at >= date('now', '-21 days') ORDER BY s.type, e.created_at DESC").fetchall()
+blockers = queries.open_blockers(conn, days=21)
 cards = claims.task_cards(conn)
 done = sum(1 for c in cards if c["status"].get("github", {}).get("value") == "done")
 
@@ -98,9 +94,7 @@ with left:
 
 with right:
     st.subheader("Activity, last 14 days")
-    rows = conn.execute(
-        "SELECT substr(created_at, 1, 10) AS day, source, COUNT(*) AS n FROM events "
-        "WHERE created_at >= date('now', '-14 days') GROUP BY day, source").fetchall()
+    rows = queries.daily_activity(conn, days=14)
     if rows:
         frame = pd.DataFrame([dict(r) for r in rows]).replace({"source": {"github": "GitHub", "notion": "Notion",
                                                                            "discord": "Chat"}})

@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import actions, auth, config, health, ui
+from teampulse import actions, auth, config, health, queries, ui
 from teampulse.webapp import get_agent, public_demo, require_page
 
 actor = require_page("sources")
@@ -20,7 +20,7 @@ PROCESS = {"github": "poller", "notion": "poller", "discord": "discord"}
 running = health.process_status(conn)
 cols = st.columns(3, gap="medium")
 for col, (key, name, env, what) in zip(cols, SOURCES):
-    count, latest = conn.execute("SELECT COUNT(*), MAX(updated_at) FROM events WHERE source = ?", (key,)).fetchone()
+    count, latest = queries.source_stats(conn, key)
     configured = bool(config.get(env)) and not public_demo()
     process = running[PROCESS[key]]
     if configured and process["state"] == "ok":
@@ -59,7 +59,7 @@ else:
 
 st.subheader("AI model")
 available = agent.llm.available()
-cached = conn.execute("SELECT COUNT(*) FROM llm_cache").fetchone()[0]
+cached = queries.cached_answer_count(conn)
 st.markdown(f"Tried in this order: **{', '.join(available) or 'none set up'}**. {cached} answers cached, so repeated "
             "questions cost nothing.")
 if available and auth.can(actor, "sources.check") and st.button("Send a test message", icon=":material/bolt:"):
@@ -75,8 +75,7 @@ if not actor.is_leader:
     st.stop()   # the team list with linked accounts is for leaders
 
 st.subheader("Team members")
-members = conn.execute("SELECT m.*, r.status AS review FROM members m LEFT JOIN contribution_reviews r "
-                       "ON r.member = m.display_name ORDER BY m.display_name").fetchall()
+members = queries.members_with_review(conn)
 if members:
     frame = pd.DataFrame([{
         "Name": m["display_name"], "Opted in": bool(m["consent"]), "Discord": bool(m["discord_id"]),

@@ -1,4 +1,8 @@
-"""Accounts, passwords, sessions and permissions.
+"""Accounts, sessions, roles and permissions: the one place that decides who may do what.
+
+Split by responsibility: identity.py (the Actor type and shared errors), passwords.py (hashing and checks),
+audit_log.py (the tamper-evident activity log), api_tokens.py (AI-assistant tokens) and grants.py (capabilities a
+leader grants). Every name is still importable from here.
 
 Two roles:
   leader  full control: creates and manages accounts, changes data and settings, sees every page
@@ -23,19 +27,25 @@ Security choices:
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import hmac
 import json
 import re
 import secrets
 import sqlite3
-import string
 import time
-from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta
 
 from teampulse import config
+
+# The core types, passwords and the activity log live in their own modules; they're imported here so that
+# `from teampulse.auth import ...` keeps working everywhere.
+from teampulse.audit_log import AUDIT_FIELDS, audit, seal_audit, verify_audit  # noqa: F401
+from teampulse.identity import (LOCAL_ADMIN, Actor, AuthError, MFARequired, PermissionDenied,  # noqa: F401
+                                iso, now)
+from teampulse.passwords import (COMMON, MIN_PASSWORD, SCRYPT, _burn_time, generate_password,  # noqa: F401
+                                 hash_password, password_problem, verify_password)
 
 ROLES = ("leader", "member")
 ROLE_NAME = {"leader": "Team leader", "member": "Team member"}
@@ -80,187 +90,8 @@ ADMIN_PAGES = {"label": "Label chat", "team": "Team & access", "dashboard": "Tea
 PERSONAL_PAGES = {"workspace": "My work", "board": "Project board"}
 DEFAULT_MEMBER_PAGES = ["home", "ask", "blockers", "conflicts", "tasks", "contributions", "memory"]
 
-SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "dklen": 32}
-MIN_PASSWORD = 10
 MAX_FAILURES = 5
 LOCK_MINUTES = 15
-COMMON = {"password", "password1", "password123", "1234567890", "qwertyuiop", "iloveyou12", "admin12345",
-          "letmein123", "welcome123", "teampulse1", "abc1234567"}
-
-
-class AuthError(Exception):
-    """A sign-in or account problem with a message that is safe to show the user."""
-
-
-class MFARequired(AuthError):
-    """The password was right; now the two-factor code. Carries a short-lived pending token, not a session."""
-
-    def __init__(self, pending: str):
-        super().__init__("Enter the 6-digit code from your authenticator app.")
-        self.pending = pending
-
-
-class PermissionDenied(Exception):
-    """The signed-in user's role doesn't allow this action."""
-
-
-@dataclass(frozen=True)
-class Actor:
-    id: str
-    username: str
-    display_name: str
-    role: str
-    member_name: str | None = None
-    must_change: bool = False
-    grants: frozenset = frozenset()     # extra capabilities from user_grants, loaded on every request
-    session: str | None = None          # hash of the session token (None: AI-assistant token, CLI, local mode)
-    needs_mfa: bool = False             # two-factor is required for them and not set up yet: they get nothing else
-
-    @property
-    def is_leader(self) -> bool:
-        return self.role == "leader"
-
-
-LOCAL_ADMIN = Actor("local", "local", "Local admin", "leader", None, False)
-
-
-def now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def iso(dt: datetime) -> str:
-    return dt.isoformat(timespec="seconds")
-
-
-# ---- passwords ------------------------------------------------------------------------------------
-
-def hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode(), salt=salt, n=SCRYPT["n"], r=SCRYPT["r"], p=SCRYPT["p"],
-                            dklen=SCRYPT["dklen"])
-    b64 = lambda b: base64.b64encode(b).decode()
-    return f"scrypt${SCRYPT['n']}${SCRYPT['r']}${SCRYPT['p']}${b64(salt)}${b64(digest)}"
-
-
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        scheme, n, r, p, salt, digest = stored.split("$")
-        if scheme != "scrypt":
-            return False
-        expected = base64.b64decode(digest)
-        actual = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt), n=int(n), r=int(r), p=int(p),
-                                dklen=len(expected))
-        return hmac.compare_digest(actual, expected)
-    except (ValueError, TypeError):
-        return False
-
-
-_DUMMY_HASH = None
-
-
-def _burn_time(password: str) -> None:
-    """Spend the same time as a real check, so response time doesn't reveal whether a username exists."""
-    global _DUMMY_HASH
-    if _DUMMY_HASH is None:
-        _DUMMY_HASH = hash_password(secrets.token_urlsafe(12))
-    verify_password(password, _DUMMY_HASH)
-
-
-def password_problem(password: str, username: str = "", display_name: str = "") -> str | None:
-    if len(password) < MIN_PASSWORD:
-        return f"Use at least {MIN_PASSWORD} characters."
-    if len(password) > 128:
-        return "Use at most 128 characters."
-    low = password.lower()
-    if low in COMMON or len(set(low)) < 5:
-        return "That password is too easy to guess. Try a short phrase of unrelated words."
-    for part in [username, *display_name.split()]:
-        if len(part) >= 3 and part.lower() in low:
-            return "Don't include your name or username in your password."
-    return None
-
-
-def generate_password() -> str:
-    """A one-time password: 14 characters, letters and digits, no look-alikes (0/O, 1/l/I)."""
-    alphabet = "".join(c for c in string.ascii_letters + string.digits if c not in "0O1lI")
-    while True:
-        candidate = "".join(secrets.choice(alphabet) for _ in range(14))
-        if any(c.isdigit() for c in candidate) and any(c.isupper() for c in candidate):
-            return candidate
-
-
-# ---- audit -------------------------------------------------------------------------------------------
-
-def audit(conn: sqlite3.Connection, actor: Actor | None, action: str, target: str = "", outcome: str = "ok",
-          detail: str = "") -> None:
-    with conn:
-        conn.execute("INSERT INTO audit_log (at, actor_id, actor_name, action, target, outcome, detail) "
-                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                     (iso(now()), actor.id if actor else None, actor.display_name if actor else None, action,
-                      str(target or "")[:200], outcome, str(detail or "")[:300]))
-    seal_audit(conn)
-
-
-# ---- tamper-evident activity log ---------------------------------------------------------------------------
-# Every entry carries the hash of the one before it, so changing or deleting an entry breaks the chain from there
-# on, and verify_audit() says where. Entries are sealed in id order under SQLite's write lock, so the app, the poller
-# and the bot writing at once can't fork the chain. The newest hash is also kept separately, which catches entries
-# removed from the end. (Someone with full write access to the database file could rebuild the whole chain; keep
-# backups, whose verification records the head hash, to compare against.)
-
-AUDIT_FIELDS = ("at", "actor_id", "actor_name", "action", "target", "outcome", "detail")
-
-
-def _digest(prev: str, row) -> str:
-    payload = json.dumps([prev] + [row[f] for f in AUDIT_FIELDS], ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(payload.encode()).hexdigest()
-
-
-def seal_audit(conn) -> int:
-    if conn.in_transaction:      # inside someone else's transaction: the next audit() call seals it
-        return 0
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        # Continue from the recorded head, not from whatever row is last: if entries were cut off the end, the next
-        # entry then points at a hash that no longer exists, and the gap stays visible.
-        head = conn.execute("SELECT value FROM settings WHERE key = 'audit:head'").fetchone()
-        last = conn.execute("SELECT hash FROM audit_log WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
-        prev = json.loads(head[0])["hash"] if head else (last[0] if last else "genesis")
-        rows = conn.execute(f"SELECT id, {', '.join(AUDIT_FIELDS)} FROM audit_log WHERE hash IS NULL ORDER BY id"  # nosec B608  # fixed column list AUDIT_FIELDS
-                            ).fetchall()
-        for r in rows:
-            h = _digest(prev, r)
-            conn.execute("UPDATE audit_log SET prev_hash = ?, hash = ? WHERE id = ?", (prev, h, r["id"]))
-            prev = h
-        if rows:
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('audit:head', ?)",
-                         (json.dumps({"id": rows[-1]["id"], "hash": prev}),))
-        conn.commit()
-        return len(rows)
-    except Exception:
-        conn.rollback()
-        raise
-
-
-def verify_audit(conn) -> dict:
-    """Recompute the chain. The first entry still kept (older ones may be removed by retention) anchors it."""
-    seal_audit(conn)
-    rows = conn.execute(f"SELECT id, prev_hash, hash, {', '.join(AUDIT_FIELDS)} FROM audit_log ORDER BY id").fetchall()  # nosec B608  # fixed column list AUDIT_FIELDS
-    if not rows:
-        return {"ok": True, "checked": 0}
-    prev = rows[0]["prev_hash"]
-    for r in rows:
-        if r["prev_hash"] != prev or _digest(prev, r) != r["hash"]:
-            return {"ok": False, "checked": len(rows), "first_bad_id": r["id"], "at": r["at"],
-                    "reason": "an entry was changed or removed here"}
-        prev = r["hash"]
-    head = conn.execute("SELECT value FROM settings WHERE key = 'audit:head'").fetchone()
-    if head:
-        h = json.loads(head[0])
-        if h["id"] > rows[-1]["id"] or (h["id"] == rows[-1]["id"] and h["hash"] != prev):
-            return {"ok": False, "checked": len(rows), "first_bad_id": rows[-1]["id"], "at": rows[-1]["at"],
-                    "reason": "the newest entries were removed"}
-    return {"ok": True, "checked": len(rows), "since": rows[0]["at"], "head": prev}
 
 
 # ---- accounts --------------------------------------------------------------------------------------
@@ -568,73 +399,6 @@ def revoke_all(conn, user_id: str, except_token: str | None = None) -> None:
         conn.execute("UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL", (iso(now()), user_id))
 
 
-# ---- personal access tokens for an AI assistant (MCP) ---------------------------------------------------------
-
-TOKEN_PREFIX = "tp_"
-TOKEN_DAYS = 90
-MAX_TOKENS = 5
-TOKEN_SCOPES = {"read": "Read only", "write": "Read, and update my own tasks"}
-
-
-def create_api_token(conn, actor: Actor, name: str, scope: str = "read", days: int = TOKEN_DAYS) -> str:
-    """Returns the token once; only its hash is stored. It acts as this person, never with more than their role."""
-    if actor is None or actor.must_change or actor.id == LOCAL_ADMIN.id:
-        raise AuthError("Sign in with your own account to connect an AI assistant.")
-    if public_demo():
-        raise AuthError("AI assistant connections are switched off in the public demo.")
-    if scope not in TOKEN_SCOPES:
-        raise AuthError("Choose read only, or read and update.")
-    name = (name or "").strip()[:60] or "AI assistant"
-    active = conn.execute("SELECT COUNT(*) FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?",
-                          (actor.id, iso(now()))).fetchone()[0]
-    if active >= MAX_TOKENS:
-        raise AuthError(f"You already have {MAX_TOKENS} connections. Remove one first.")
-    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
-    with conn:
-        conn.execute("INSERT INTO api_tokens (user_id, name, token_hash, scope, created_at, expires_at) "
-                     "VALUES (?, ?, ?, ?, ?, ?)", (actor.id, name, _token_hash(token), scope, iso(now()),
-                                                   iso(now() + timedelta(days=max(1, min(int(days), 365))))))
-    audit(conn, actor, "token.create", name, detail=scope)
-    return token
-
-
-def resolve_api_token(conn, token: str | None) -> tuple[Actor, str] | None:
-    """(person, scope) for a valid token, or None if it's unknown, revoked, expired, or the account can't be used."""
-    if not token or not str(token).startswith(TOKEN_PREFIX):
-        return None
-    row = conn.execute("SELECT t.id AS token_id, t.scope, t.expires_at, t.revoked_at, t.last_used, u.* "
-                       "FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?",
-                       (_token_hash(str(token)),)).fetchone()
-    if row is None or row["revoked_at"] or row["expires_at"] <= iso(now()) or not row["active"] or row["must_change"] \
-            or _needs_mfa(row):
-        return None
-    if not row["last_used"] or row["last_used"] < iso(now() - timedelta(minutes=1)):   # at most one write a minute
-        with conn:
-            conn.execute("UPDATE api_tokens SET last_used = ? WHERE id = ?", (iso(now()), row["token_id"]))
-    return _row_actor(row, conn), row["scope"]
-
-
-def list_api_tokens(conn, actor: Actor, everyone: bool = False) -> list[dict]:
-    sql = ("SELECT t.id, t.name, t.scope, t.created_at, t.expires_at, t.last_used, u.display_name, u.id AS user_id "
-           "FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.revoked_at IS NULL AND t.expires_at > ?")
-    params: list = [iso(now())]
-    if not (everyone and can(actor, "users.manage")):
-        sql += " AND t.user_id = ?"
-        params.append(actor.id)
-    return [dict(r) for r in conn.execute(sql + " ORDER BY t.id DESC", params)]
-
-
-def revoke_api_token(conn, actor: Actor, token_id: int) -> None:
-    row = conn.execute("SELECT user_id, name FROM api_tokens WHERE id = ? AND revoked_at IS NULL", (int(token_id),)).fetchone()
-    if row is None:
-        return
-    if not authorize(conn, actor, "token.revoke", row["user_id"]):   # your own, or a leader cutting anyone's
-        require(conn, actor, "users.manage", f"token {token_id}")
-    with conn:
-        conn.execute("UPDATE api_tokens SET revoked_at = ? WHERE id = ?", (iso(now()), int(token_id)))
-    audit(conn, actor, "token.revoke", row["name"])
-
-
 def change_password(conn, actor: Actor, token: str, current: str, new: str) -> None:
     key = _throttle_key(actor.username)          # same counter as sign-in: a stolen session can't guess it
     _check_lock(conn, key)
@@ -766,38 +530,6 @@ def page_allowed(conn, actor: Actor | None, page: str) -> bool:
     return page in member_pages(conn)
 
 
-# ---- capability grants ------------------------------------------------------------------------------------
-
-def list_grants(conn) -> dict[str, list[str]]:
-    out: dict[str, list[str]] = {}
-    for r in conn.execute("SELECT user_id, permission FROM user_grants ORDER BY permission"):
-        if r[1] in GRANTABLE:
-            out.setdefault(r[0], []).append(r[1])
-    return out
-
-
-def set_grant(conn, actor: Actor, user_id: str, permission: str, on: bool) -> None:
-    """Leader only. Members only, allowlisted capabilities only, never to yourself; takes effect on the person's next
-    click or AI-assistant call, because permissions are loaded on every request."""
-    require(conn, actor, "users.manage", f"grant {permission}")
-    require_recent_auth(conn, actor, "grant")
-    if permission not in GRANTABLE or permission in NEVER_GRANTABLE:
-        audit(conn, actor, "grant.set", user_id, "denied", f"not grantable: {permission}")
-        raise PermissionDenied("That can't be granted. Account and security administration stay with team leaders.")
-    if user_id == actor.id:
-        raise PermissionDenied("You can't change your own permissions.")
-    user = get_user(conn, user_id)
-    if user is None or user["role"] != "member" or not user["active"]:
-        raise AuthError("Capabilities can only be granted to active team members.")
-    with conn:
-        if on:
-            conn.execute("INSERT OR IGNORE INTO user_grants (user_id, permission, granted_by, granted_at) "
-                         "VALUES (?, ?, ?, ?)", (user_id, permission, actor.id, iso(now())))
-        else:
-            conn.execute("DELETE FROM user_grants WHERE user_id = ? AND permission = ?", (user_id, permission))
-    audit(conn, actor, "grant.add" if on else "grant.remove", user["username"], detail=permission)
-
-
 # ---- CLI (for whoever runs the server; it has direct database access anyway) -----------------------
 
 def main():
@@ -834,6 +566,20 @@ def main():
         revoke_all(conn, user["id"])
         audit(conn, None, "account.reset_cli", user["username"])
         print(f"New one-time password for {user['username']}: {password}")
+
+
+# AI-assistant tokens and capability grants depend on the permission checks above, so they're loaded on first use.
+_MOVED = {name: "teampulse.api_tokens" for name in ("TOKEN_PREFIX", "TOKEN_DAYS", "MAX_TOKENS", "TOKEN_SCOPES",
+                                                     "create_api_token", "resolve_api_token", "list_api_tokens",
+                                                     "revoke_api_token")}
+_MOVED.update({name: "teampulse.grants" for name in ("list_grants", "set_grant")})
+
+
+def __getattr__(name: str):
+    if name in _MOVED:
+        import importlib
+        return getattr(importlib.import_module(_MOVED[name]), name)
+    raise AttributeError(f"module 'teampulse.auth' has no attribute {name!r}")
 
 
 if __name__ == "__main__":

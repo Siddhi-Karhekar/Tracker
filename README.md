@@ -82,7 +82,7 @@ Underneath it all:
   - a Security page that shows only measured numbers.
 - **Guardrails** on every AI answer.
 - **Evaluation**: a full suite per agent, plus RAGAS and LangSmith.
-- **Tests**: 328 automated tests, plus a real-browser test.
+- **Tests**: 334 automated tests, plus a real-browser test.
 
 The design decisions, permission matrix and data model for project management are in
 [docs/TEAMPULSE_2.md](docs/TEAMPULSE_2.md).
@@ -529,7 +529,7 @@ and Markdown from any source are escaped on every page.
 ## 9. Evaluation and testing
 
 ### Automated tests
-`python -m pytest -q` runs **328 offline tests** (no keys, no internet). They cover agents, guardrail
+`python -m pytest -q` runs **334 offline tests** (no keys, no internet). They cover agents, guardrail
 attacks, both roles through the real pages, XSS on every page, concurrency, privacy deletion, backups, and a
 regression test for every bug found by real AI runs, and project management (permissions per role and per
 assignee, workflow rules, two people editing at once, both roles through the pages). A Playwright test runs the
@@ -755,22 +755,27 @@ teampulse/
   signals.py                chat scanner: conversations → labels → task links
   tasks.py                  task registry, chat → task linking
   claims.py                 status / owner / deadline claims per source
-  discrepancies.py          conflict rules and tracking
+  discrepancies.py          conflict rules (one registered function per kind) and tracking
   contributions.py          evidence-based reports, claim checks, opt-in + self-review
   memory.py                 remember / forget / recall, verified against live data
   verifier.py               checks each cited statement against its source
   guardrails.py             output checks on every answer
   agents/                   supervisor, retrieval, blockers, discrepancy, contributions, baseline (plain RAG)
-  auth.py, actions.py       accounts, sessions, roles; the only write path (server-side checks)
+  auth.py, actions.py       accounts, sessions, roles, permission checks; the only write path (server-side)
+  identity.py, passwords.py who is acting (Actor) and shared errors; password hashing and rules
+  audit_log.py              tamper-evident activity log
+  api_tokens.py, grants.py  AI-assistant tokens; capabilities a leader grants
   mfa.py                    two-factor sign-in (TOTP, standard library), recovery codes
   injection.py              detects and isolates instructions hidden in team text
-  pm.py, pm_ui.py           project management: rules and permission checks; task cards and task panel
+  pm.py, pm_read.py         project management: rules for changing the plan; reading it (lists, dashboard, calendar)
+  pm_ui.py                  task cards and task panel
   pm_sync.py                planned tasks ↔ GitHub issues / Notion pages: evidence, disagreements, import
   pm_ai.py                  AI planner (propose → confirm), do next, progress-update drafts, weekly summary
   mcp_server.py, mcp_tools.py  TeamPulse as an MCP server for Claude Desktop; personal tokens in auth.py
-  pm_monitor.py             daily check-ins: 12 checks, suggestions only
+  pm_monitor.py             daily check-ins: 12 checks as registered functions, suggestions only
   security.py               authorization coverage (from the code) and the Security page's measurements
   ui.py, webapp.py          design system, shared page helpers, public demo mode
+  queries.py                every read query the pages need (pages contain no SQL; a test enforces it)
   health.py                 connection checks and process status
   maintenance.py            retention purge, verified backup and restore
   http.py, tracing.py       retrying HTTP sessions; Phoenix / LangSmith tracing
@@ -782,7 +787,7 @@ eval_data/                  18 golden questions (with reference answers), 60 Hin
 docs/TEAMPULSE_2.md         project management: decisions, MCP assessment, permissions, data model, roadmap
 docs/THREAT_MODEL.md · AI_SECURITY.md · PRIVACY.md · INCIDENT_RESPONSE.md
 scripts/scan_secrets.py     secret scan of every tracked file and the full git history (CI)
-tests/                      328 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
+tests/                      334 offline tests, plus tests/e2e (real browser) (+ tests/eval_env for the RAGAS environment)
 requirements.txt            direct dependencies
 requirements.lock           exact tested versions for every OS (install this)
 requirements-eval.txt       RAGAS environment
@@ -842,7 +847,7 @@ SECURITY.md · AUDIT.md      security design and checklists · production-readin
 | Project management: all five phases of the 2.0 plan ([details](docs/TEAMPULSE_2.md#where-the-upgrade-plan-stands)) | ~95% |
 | UI | ~95% |
 | Security (zero trust: policy, grants, re-authentication, tamper-evident log, encrypted backups, secret redaction and scanning, measured Security page) | ~100% |
-| Tests and CI (328 tests, real-browser test, Linux and Windows) | ~100% |
+| Tests and CI (334 tests, real-browser test, Linux and Windows) | ~100% |
 | Evaluation with a real AI | ~60% |
 | Real-world use with a live team | ~10% |
 | Public deployment and demo video | ~30% |

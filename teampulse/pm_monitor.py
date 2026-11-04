@@ -15,6 +15,8 @@ Checks (all from the data, no AI):
   unassigned    due within 14 days and nobody assigned
   sources       planned tasks that GitHub or Notion disagree with
 
+Each check is one registered function (see "the checks" below), so a new check is a new function.
+
 run_checks() is safe to call any number of times (the poll loop and the dashboard both do). Each situation is one
 alert: it's updated while it lasts, marked resolved when it ends, and reopened if it comes back. Dismissed alerts stay
 quiet until their situation ends. New alerts produce one daily note for the leaders and, for "blocked with no update"
@@ -23,6 +25,8 @@ and "no update", one gentle nudge to the people on the task. Members can see the
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from teampulse import pm, pm_sync
@@ -90,116 +94,194 @@ def pace(conn, t: dict, at: datetime) -> dict | None:
 
 
 # ---- the checks ----------------------------------------------------------------------------------------------
+#
+# Each check is a small function registered with @task_check (run once per open task) or @team_check (run once).
+# find() runs them all; adding a check means adding a function here, not editing find().
 
-def find(conn, on: date | None = None, at: datetime | None = None) -> list[dict]:
-    on = on or pm.today()
-    at = at or datetime.now(timezone.utc)
-    found: list[dict] = []
+@dataclass
+class Context:
+    """What every check can read: the connection, the day and time, and the tasks already loaded once."""
+    conn: object
+    on: date
+    at: datetime
+    tasks: list[dict]
+    by_id: dict[int, dict]
+    soon: str          # 7 days from `on`
 
-    def add(kind, severity, text, suggestion, task=None, member=None, project_id=None, key=None):
-        found.append({"key": key or f"{kind}:{task['id'] if task else member}", "kind": kind, "severity": severity,
-                      "text": text, "suggestion": suggestion, "task_id": task["id"] if task else None,
-                      "member": member, "project_id": task["project_id"] if task else project_id})
 
-    tasks = pm.tasks(conn, on=on)
-    by_id = {t["id"]: t for t in tasks}
-    for t in tasks:
-        if t["status"] == "done":
-            continue
-        ref, left, who = f"#{t['id']} “{t['title']}”", t["days_left"], _people(t)
-        flagged = False
-        if t["overdue"]:
-            add("overdue", "high", f"{ref} is {_plural(-left, 'day')} past its deadline ({t['due_date']}).",
-                f"Agree a new date with {who}, or cut it down to what can still ship.", t)
-            flagged = True
-        elif left is not None and t["status"] not in ("review",):
-            p = pace(conn, t, at) if t["status"] in ("in_progress", "blocked", "todo") else None
-            if p and p["needs"] - left >= PACE_LATE_DAYS:
-                add("pace", "high" if left <= 3 else "medium",
+TaskCheck = Callable[[Context, dict], Iterable[dict]]
+TeamCheck = Callable[[Context], Iterable[dict]]
+TASK_CHECKS: list[TaskCheck] = []
+TEAM_CHECKS: list[TeamCheck] = []
+
+
+def task_check(fn: TaskCheck) -> TaskCheck:
+    TASK_CHECKS.append(fn)
+    return fn
+
+
+def team_check(fn: TeamCheck) -> TeamCheck:
+    TEAM_CHECKS.append(fn)
+    return fn
+
+
+def alert(kind, severity, text, suggestion, task=None, member=None, project_id=None, key=None) -> dict:
+    return {"key": key or f"{kind}:{task['id'] if task else member}", "kind": kind, "severity": severity,
+            "text": text, "suggestion": suggestion, "task_id": task["id"] if task else None,
+            "member": member, "project_id": task["project_id"] if task else project_id}
+
+
+def _ref(t: dict) -> str:
+    return f"#{t['id']} “{t['title']}”"
+
+
+@task_check
+def deadline_risk(ctx: Context, t: dict):
+    """overdue, else pace (would finish late at the current rate), else behind (due soon, under half done)."""
+    ref, left, who = _ref(t), t["days_left"], _people(t)
+    if t["overdue"]:
+        yield alert("overdue", "high", f"{ref} is {_plural(-left, 'day')} past its deadline ({t['due_date']}).",
+                    f"Agree a new date with {who}, or cut it down to what can still ship.", t)
+        return
+    if left is None or t["status"] == "review":
+        return
+    p = pace(ctx.conn, t, ctx.at) if t["status"] in ("in_progress", "blocked", "todo") else None
+    if p and p["needs"] - left >= PACE_LATE_DAYS:
+        yield alert("pace", "high" if left <= 3 else "medium",
                     f"{ref}: self-reported progress went from {p['from']}% to {p['to']}% in {_plural(p['days'], 'day')} "
                     f"(about {p['per_day']:.0f}% a day). At that pace it needs about {_plural(p['needs'], 'more day')}, "
                     f"but it's due in {_plural(left, 'day')}.",
                     f"Check with {who} whether to cut scope, add help, or move the deadline.", t)
-                flagged = True
-            if not flagged and 0 <= left <= 3 and max(t["reported_progress"], t["verified_progress"] or 0) < 50:
-                add("behind", "high", f"{ref} is due in {_plural(left, 'day')} and is "
+    elif 0 <= left <= 3 and max(t["reported_progress"], t["verified_progress"] or 0) < 50:
+        yield alert("behind", "high", f"{ref} is due in {_plural(left, 'day')} and is "
                                       f"{t['reported_progress']}% done (self-reported).",
                     f"Ask {who} what's left and whether the date still works.", t)
-        for d in conn.execute("SELECT depends_on FROM pm_dependencies WHERE task_id = ?", (t["id"],)):
-            dep = by_id.get(d[0])
-            if dep and dep["status"] != "done" and t["due_date"] and (not dep["due_date"] or dep["due_date"] > t["due_date"]):
-                add("dependency", "medium",
-                    f"{ref} is due {t['due_date']} but waits for #{dep['id']} “{dep['title']}”, "
-                    + (f"which is due later ({dep['due_date']})." if dep["due_date"] else "which has no deadline."),
-                    "Move one of the two deadlines, or split out the part that doesn't need the other task.", t,
-                    key=f"dependency:{t['id']}:{dep['id']}")
-        quiet = _days(last_activity(conn, t["id"]), at)
-        if t["status"] == "blocked" and quiet is not None and quiet >= STALE_BLOCKER_DAYS:
-            add("stale_blocker", "high", f"{ref} has been blocked for {_plural(quiet, 'day')} with no update"
-                                         + (f": {t['blocked_reason']}" if t["blocked_reason"] else "."),
-                f"Ask {who} what would unblock it. If it's waiting on someone outside the team, note who and by when.", t)
-        if t["status"] == "in_progress" and quiet is not None and quiet >= SILENT_DAYS:
-            v = pm_sync.view(conn, t)
-            source_quiet = _days(v["last_activity"], at) if v and not v["missing"] else None
-            if source_quiet is None or source_quiet >= SILENT_DAYS:
-                add("silent", "medium", f"{ref} is in progress, but nothing about it has changed in "
+
+
+@task_check
+def dependency_order(ctx: Context, t: dict):
+    for d in ctx.conn.execute("SELECT depends_on FROM pm_dependencies WHERE task_id = ?", (t["id"],)):
+        dep = ctx.by_id.get(d[0])
+        if dep and dep["status"] != "done" and t["due_date"] and (not dep["due_date"] or dep["due_date"] > t["due_date"]):
+            yield alert("dependency", "medium",
+                        f"{_ref(t)} is due {t['due_date']} but waits for #{dep['id']} “{dep['title']}”, "
+                        + (f"which is due later ({dep['due_date']})." if dep["due_date"] else "which has no deadline."),
+                        "Move one of the two deadlines, or split out the part that doesn't need the other task.", t,
+                        key=f"dependency:{t['id']}:{dep['id']}")
+
+
+@task_check
+def stale_blocker(ctx: Context, t: dict):
+    if t["status"] != "blocked":
+        return
+    quiet = _days(last_activity(ctx.conn, t["id"]), ctx.at)
+    if quiet is not None and quiet >= STALE_BLOCKER_DAYS:
+        yield alert("stale_blocker", "high", f"{_ref(t)} has been blocked for {_plural(quiet, 'day')} with no update"
+                                             + (f": {t['blocked_reason']}" if t["blocked_reason"] else "."),
+                    f"Ask {_people(t)} what would unblock it. If it's waiting on someone outside the team, note who and "
+                    "by when.", t)
+
+
+@task_check
+def silent(ctx: Context, t: dict):
+    if t["status"] != "in_progress":
+        return
+    quiet = _days(last_activity(ctx.conn, t["id"]), ctx.at)
+    if quiet is None or quiet < SILENT_DAYS:
+        return
+    v = pm_sync.view(ctx.conn, t)
+    source_quiet = _days(v["last_activity"], ctx.at) if v and not v["missing"] else None
+    if source_quiet is None or source_quiet >= SILENT_DAYS:
+        yield alert("silent", "medium", f"{_ref(t)} is in progress, but nothing about it has changed in "
                                         f"{_plural(quiet, 'day')}.",
-                    f"A quick check-in with {who}: is it still on track, or is something in the way?", t)
-        if t["status"] == "review":
-            row = conn.execute("SELECT MAX(at) FROM pm_history WHERE task_id = ? AND field = 'status' AND new_value = 'review'",
-                               (t["id"],)).fetchone()
-            waited = _days(row[0], at)
-            if waited is not None and waited >= WAIT_DAYS:
-                add("review_wait", "medium", f"{ref} has been waiting {_plural(waited, 'day')} for your review.",
+                    f"A quick check-in with {_people(t)}: is it still on track, or is something in the way?", t)
+
+
+@task_check
+def review_wait(ctx: Context, t: dict):
+    if t["status"] != "review":
+        return
+    row = ctx.conn.execute("SELECT MAX(at) FROM pm_history WHERE task_id = ? AND field = 'status' AND new_value = 'review'",
+                           (t["id"],)).fetchone()
+    waited = _days(row[0], ctx.at)
+    if waited is not None and waited >= WAIT_DAYS:
+        yield alert("review_wait", "medium", f"{_ref(t)} has been waiting {_plural(waited, 'day')} for your review.",
                     "Approve it, or send it back with a note on what's missing.", t)
-        if not t["assignees"] and left is not None and left <= 14:
-            add("unassigned", "medium", f"{ref} is due in {_plural(left, 'day')} and nobody is assigned.",
-                "Assign it, or move it to the backlog if it can wait.", t)
 
-    for r in conn.execute("SELECT r.*, t.title, t.project_id FROM pm_requests r JOIN pm_tasks t ON t.id = r.task_id "
-                          "WHERE r.status = 'pending' AND t.archived = 0"):
-        waited = _days(r["created_at"], at)
+
+@task_check
+def unassigned(ctx: Context, t: dict):
+    if not t["assignees"] and t["days_left"] is not None and t["days_left"] <= 14:
+        yield alert("unassigned", "medium", f"{_ref(t)} is due in {_plural(t['days_left'], 'day')} and nobody is assigned.",
+                    "Assign it, or move it to the backlog if it can wait.", t)
+
+
+@team_check
+def request_wait(ctx: Context):
+    for r in ctx.conn.execute("SELECT r.*, t.title, t.project_id FROM pm_requests r JOIN pm_tasks t ON t.id = r.task_id "
+                              "WHERE r.status = 'pending' AND t.archived = 0"):
+        waited = _days(r["created_at"], ctx.at)
         if waited is not None and waited >= WAIT_DAYS:
-            add("request_wait", "medium", f"{r['requested_by']} asked {_plural(waited, 'day')} ago to move "
-                                          f"#{r['task_id']} “{r['title']}” to {r['proposed']}.",
-                "Approve or decline it, so they can plan.", by_id.get(r["task_id"]) or {"id": r["task_id"],
-                                                                                    "project_id": r["project_id"]},
-                key=f"request_wait:{r['id']}")
+            yield alert("request_wait", "medium", f"{r['requested_by']} asked {_plural(waited, 'day')} ago to move "
+                                                  f"#{r['task_id']} “{r['title']}” to {r['proposed']}.",
+                        "Approve or decline it, so they can plan.",
+                        ctx.by_id.get(r["task_id"]) or {"id": r["task_id"], "project_id": r["project_id"]},
+                        key=f"request_wait:{r['id']}")
 
-    soon = (on + timedelta(days=7)).isoformat()
+
+@team_check
+def overload(ctx: Context):
     load = {}
-    for t in tasks:
-        if t["status"] != "done" and t["due_date"] and t["due_date"] <= soon:
+    for t in ctx.tasks:
+        if t["status"] != "done" and t["due_date"] and t["due_date"] <= ctx.soon:
             for name in t["assignees"]:
                 size, count = load.get(name, (0, 0))
                 load[name] = (size + (t["weight"] or 1), count + 1)
-    if load:
-        lightest = min(pm.members(conn), key=lambda n: (load.get(n, (0, 0))[0], n.lower()))
-        for name, (size, count) in sorted(load.items()):
-            if size >= OVERLOAD_SIZE or count >= OVERLOAD_COUNT:
-                other = load.get(lightest, (0, 0))[0]
-                add("overload", "medium",
-                    f"{name} has {_plural(count, 'open task')} due in the next 7 days (total size {size}).",
-                    "See whether something can move to later, or to someone with less due this week"
-                    + (f" ({lightest} has {'nothing' if not other else f'size {other}'} due)." if lightest != name else "."),
-                    member=name, key=f"overload:{name.lower()}")
+    if not load:
+        return
+    lightest = min(pm.members(ctx.conn), key=lambda n: (load.get(n, (0, 0))[0], n.lower()))
+    for name, (size, count) in sorted(load.items()):
+        if size >= OVERLOAD_SIZE or count >= OVERLOAD_COUNT:
+            other = load.get(lightest, (0, 0))[0]
+            yield alert("overload", "medium",
+                        f"{name} has {_plural(count, 'open task')} due in the next 7 days (total size {size}).",
+                        "See whether something can move to later, or to someone with less due this week"
+                        + (f" ({lightest} has {'nothing' if not other else f'size {other}'} due)." if lightest != name else "."),
+                        member=name, key=f"overload:{name.lower()}")
 
-    for p in pm.projects(conn):
-        for m in pm.dashboard(conn, p["id"], on)["milestones"]:
-            if m["due_date"] and m["due_date"] <= soon and m["tasks"] and m["completion"] < 50:
-                days_to = (date.fromisoformat(m["due_date"]) - on).days
-                add("milestone", "high" if days_to <= 3 else "medium",
-                    f"Milestone “{m['title']}” is due in {_plural(days_to, 'day')} and is {m['completion']}% complete "
-                    f"by size ({m['done']} of {m['tasks']} tasks).",
-                    "Decide what's essential for it, and move the rest to the next milestone.", project_id=p["id"],
-                    key=f"milestone:{m['id']}")
-        disagree = pm_sync.overview(conn, p["id"])["disagree"]
+
+@team_check
+def milestone_risk(ctx: Context):
+    for p in pm.projects(ctx.conn):
+        for m in pm.dashboard(ctx.conn, p["id"], ctx.on)["milestones"]:
+            if m["due_date"] and m["due_date"] <= ctx.soon and m["tasks"] and m["completion"] < 50:
+                days_to = (date.fromisoformat(m["due_date"]) - ctx.on).days
+                yield alert("milestone", "high" if days_to <= 3 else "medium",
+                            f"Milestone “{m['title']}” is due in {_plural(days_to, 'day')} and is {m['completion']}% "
+                            f"complete by size ({m['done']} of {m['tasks']} tasks).",
+                            "Decide what's essential for it, and move the rest to the next milestone.", project_id=p["id"],
+                            key=f"milestone:{m['id']}")
+
+
+@team_check
+def source_disagreements(ctx: Context):
+    for p in pm.projects(ctx.conn):
+        disagree = pm_sync.overview(ctx.conn, p["id"])["disagree"]
         if disagree:
-            add("sources", "low", f"{_plural(len(disagree), 'planned task')} in “{p['name']}” "
-                                  f"disagree{'s' if len(disagree) == 1 else ''} with GitHub or Notion.",
-                "Look at Team dashboard → GitHub & Notion and fix whichever side is out of date.",
-                project_id=p["id"], key=f"sources:{p['id']}")
-    return found
+            yield alert("sources", "low", f"{_plural(len(disagree), 'planned task')} in “{p['name']}” "
+                                          f"disagree{'s' if len(disagree) == 1 else ''} with GitHub or Notion.",
+                        "Look at Team dashboard → GitHub & Notion and fix whichever side is out of date.",
+                        project_id=p["id"], key=f"sources:{p['id']}")
+
+
+def find(conn, on: date | None = None, at: datetime | None = None) -> list[dict]:
+    """Run every registered check. Open tasks go through each task check; then each team check runs once."""
+    on = on or pm.today()
+    tasks = pm.tasks(conn, on=on)
+    ctx = Context(conn=conn, on=on, at=at or datetime.now(timezone.utc), tasks=tasks,
+                  by_id={t["id"]: t for t in tasks}, soon=(on + timedelta(days=7)).isoformat())
+    found = [a for t in tasks if t["status"] != "done" for check in TASK_CHECKS for a in check(ctx, t)]
+    return found + [a for check in TEAM_CHECKS for a in check(ctx)]
 
 
 # ---- keeping track ---------------------------------------------------------------------------------------------

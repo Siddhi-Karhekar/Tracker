@@ -26,6 +26,8 @@ import json
 import logging
 import re
 import sqlite3
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import date
 
 from teampulse.claims import task_cards
@@ -78,87 +80,126 @@ def _keys(names: set[str]) -> set[str]:
     return {_person_key(n) for n in names if n}
 
 
-def detect_task(conn: sqlite3.Connection, card: dict) -> list[dict]:
-    found = []
-    name = (f"#{card['number']} " if card["number"] else "") + card["title"]
-    st = card["status"]
-    done = {s for s, c in st.items() if c["value"] in FINISHED}
-    notdone = {s for s, c in st.items() if c["value"] in NOT_DONE}
-    chat_blocked = st.get("chat", {}).get("value") == "blocked"
+# ---- task rules ------------------------------------------------------------------------------------------------
+#
+# Each rule is a function registered with @task_rule. It gets the facts about one task card and returns what it
+# found. detect_task() runs them all, so a new kind of conflict is a new function, not an edit to the others.
 
-    def add(kind, severity, title, suggestion, sides, verified=True):
-        found.append({"id": _id(kind, card["id"], [s["value"] for s in sides]), "task_id": card["id"], "task": name,
-                      "type": kind, "severity": severity, "title": title, "suggestion": suggestion,
-                      "sides": sides, "verified": verified})
+@dataclass
+class TaskFacts:
+    conn: sqlite3.Connection
+    card: dict
+    name: str
+    status: dict          # source -> claim
+    done: set             # sources that say finished
+    notdone: set          # sources that say not finished
+    chat_blocked: bool
 
-    # ---- status ----
-    if "notion" in done and notdone:
+    @property
+    def finished(self) -> bool:
+        return bool(self.done) and not self.notdone
+
+    def found(self, kind, severity, title, suggestion, sides, verified=True) -> dict:
+        return {"id": _id(kind, self.card["id"], [s["value"] for s in sides]), "task_id": self.card["id"],
+                "task": self.name, "type": kind, "severity": severity, "title": title, "suggestion": suggestion,
+                "sides": sides, "verified": verified}
+
+
+TaskRule = Callable[[TaskFacts], Iterable[dict]]
+TASK_RULES: list[TaskRule] = []
+
+
+def task_rule(fn: TaskRule) -> TaskRule:
+    TASK_RULES.append(fn)
+    return fn
+
+
+def _chat_after_close(f: TaskFacts) -> bool:
+    st = f.status
+    return f.chat_blocked and (st["chat"]["observed_at"] or "") > (st["github"]["observed_at"] or "")
+
+
+@task_rule
+def status_rule(f: TaskFacts):
+    st, name, conn = f.status, f.name, f.conn
+    reopen = ("status", "medium", f"{name}: closed on GitHub, but chat reported a problem afterwards",
+              "Reopen the issue if the problem is real.")
+    if "notion" in f.done and f.notdone:
         reasons = []
         if st.get("github", {}).get("value") in NOT_DONE:
-            reasons.append(f"the GitHub {'issue is still open' if st['github']['value'] == 'open' else 'shows ' + STATUS_TEXT[st['github']['value']]}")
+            gh = st["github"]["value"]
+            reasons.append(f"the GitHub {'issue is still open' if gh == 'open' else 'shows ' + STATUS_TEXT[gh]}")
         if st.get("chat", {}).get("value") in NOT_DONE:
             reasons.append(f"chat says it's {STATUS_TEXT[st['chat']['value']]}")
-        sides = [_side(conn, st[s]) for s in ("notion", "github", "chat") if s in st]
-        add("status", "high" if chat_blocked else "medium",
-            f"{name}: marked done in Notion, but " + " and ".join(reasons),
-            "Check whether it really works. If not, move it back in Notion; if it does, close the GitHub issue "
-            "and reply in chat.", sides)
-    elif "github" in done and "notion" in notdone:
-        add("stale_plan", "low",
-            f"{name}: GitHub shows it done, but Notion still says '{STATUS_TEXT[st['notion']['value']]}'",
-            "Update the Notion task to Done.", [_side(conn, st["github"]), _side(conn, st["notion"])])
-        if chat_blocked and (st["chat"]["observed_at"] or "") > (st["github"]["observed_at"] or ""):
-            add("status", "medium", f"{name}: closed on GitHub, but chat reported a problem afterwards",
-                "Reopen the issue if the problem is real.", [_side(conn, st["github"]), _side(conn, st["chat"])])
-    elif "chat" in done and notdone:
-        add("status", "low", f"{name}: chat says it's done, but the trackers don't",
-            "If it's really finished, close the issue / mark it done in Notion.",
-            [_side(conn, st[s]) for s in ("chat", "github", "notion") if s in st])
-    elif "github" in done and chat_blocked and (st["chat"]["observed_at"] or "") > (st["github"]["observed_at"] or ""):
-        add("status", "medium", f"{name}: closed on GitHub, but chat reported a problem afterwards",
-            "Reopen the issue if the problem is real.", [_side(conn, st["github"]), _side(conn, st["chat"])])
+        yield f.found("status", "high" if f.chat_blocked else "medium",
+                      f"{name}: marked done in Notion, but " + " and ".join(reasons),
+                      "Check whether it really works. If not, move it back in Notion; if it does, close the GitHub "
+                      "issue and reply in chat.", [_side(conn, st[s]) for s in ("notion", "github", "chat") if s in st])
+    elif "github" in f.done and "notion" in f.notdone:
+        yield f.found("stale_plan", "low",
+                      f"{name}: GitHub shows it done, but Notion still says '{STATUS_TEXT[st['notion']['value']]}'",
+                      "Update the Notion task to Done.", [_side(conn, st["github"]), _side(conn, st["notion"])])
+        if _chat_after_close(f):
+            yield f.found(*reopen, [_side(conn, st["github"]), _side(conn, st["chat"])])
+    elif "chat" in f.done and f.notdone:
+        yield f.found("status", "low", f"{name}: chat says it's done, but the trackers don't",
+                      "If it's really finished, close the issue / mark it done in Notion.",
+                      [_side(conn, st[s]) for s in ("chat", "github", "notion") if s in st])
+    elif "github" in f.done and _chat_after_close(f):
+        yield f.found(*reopen, [_side(conn, st["github"]), _side(conn, st["chat"])])
 
-    finished = bool(done) and not notdone
 
-    # ---- owner ----
-    owners = card["owner"]
+@task_rule
+def owner_rule(f: TaskFacts):
+    conn, name, owners = f.conn, f.name, f.card["owner"]
     assigned_claims = [owners[s] for s in ("github", "notion") if s in owners]
     assigned = set().union(*(_names(c["value"]) for c in assigned_claims)) if assigned_claims else set()
     workers = conn.execute(
         "SELECT * FROM claims WHERE task_id = ? AND attribute = 'worker' AND observed_at >= date('now', ?) "
-        "ORDER BY observed_at DESC", (card["id"], f"-{WORKER_DAYS} days")).fetchall()
+        "ORDER BY observed_at DESC", (f.card["id"], f"-{WORKER_DAYS} days")).fetchall()
     doer_claims = [dict(w) for w in workers]
     if "chat" in owners:
         doer_claims.insert(0, owners["chat"])
     doers = set().union(*(_names(c["value"]) for c in doer_claims)) if doer_claims else set()
-    if assigned and doers and not (_keys(assigned) & _keys(doers)) and not finished:
+    if assigned and doers and not (_keys(assigned) & _keys(doers)) and not f.finished:
         evidence = []
         for c in doer_claims:   # one piece of evidence per person doing the work, chat first
             if not any(e["value"] == c["value"] for e in evidence):
                 evidence.append(_side(conn, c, "chat" if c["source"] == "chat" else f"{c['method'].replace('_', ' ')}"))
-        add("owner", "medium",
-            f"{name}: assigned to {', '.join(sorted(assigned))}, but {', '.join(sorted(doers))} is doing the work",
-            "Reassign it in GitHub and Notion, or confirm in chat who is responsible.",
-            [_side(conn, c) for c in assigned_claims] + evidence[:3])
+        yield f.found("owner", "medium",
+                      f"{name}: assigned to {', '.join(sorted(assigned))}, but {', '.join(sorted(doers))} is doing the work",
+                      "Reassign it in GitHub and Notion, or confirm in chat who is responsible.",
+                      [_side(conn, c) for c in assigned_claims] + evidence[:3])
     elif "github" in owners and "notion" in owners and \
             _keys(_names(owners["github"]["value"])) != _keys(_names(owners["notion"]["value"])):
-        add("owner", "low", f"{name}: GitHub and Notion assign different people",
-            "Make the assignees match.", [_side(conn, owners["github"]), _side(conn, owners["notion"])])
+        yield f.found("owner", "low", f"{name}: GitHub and Notion assign different people",
+                      "Make the assignees match.", [_side(conn, owners["github"]), _side(conn, owners["notion"])])
 
-    # ---- deadline ----
-    dl = card["deadline"]
+
+@task_rule
+def deadline_rule(f: TaskFacts):
+    dl = f.card["deadline"]
     dates = {s: c["value"] for s, c in dl.items() if c["value"]}
-    if len(set(dates.values())) > 1 and not finished:
-        spread = abs((date.fromisoformat(max(dates.values())) - date.fromisoformat(min(dates.values()))).days)
-        if spread >= 2:
-            soonest = min(dates.values())
-            urgent = _days(soonest) <= 3
-            parts = ", ".join(f"{SOURCE_NAME[s]} {d}" for s, d in dates.items())
-            add("deadline", "high" if urgent else "medium", f"{name}: different deadlines ({parts})",
-                ("The earliest date is " + ("already past" if _days(soonest) < 0 else f"in {_days(soonest)} day(s)")
-                 + ". Agree on one date and update the others."),
-                [_side(conn, dl[s]) for s in dates])
-    return found
+    if len(set(dates.values())) < 2 or f.finished:
+        return
+    if abs((date.fromisoformat(max(dates.values())) - date.fromisoformat(min(dates.values()))).days) < 2:
+        return
+    soonest = min(dates.values())
+    parts = ", ".join(f"{SOURCE_NAME[s]} {d}" for s, d in dates.items())
+    yield f.found("deadline", "high" if _days(soonest) <= 3 else "medium", f"{f.name}: different deadlines ({parts})",
+                  ("The earliest date is " + ("already past" if _days(soonest) < 0 else f"in {_days(soonest)} day(s)")
+                   + ". Agree on one date and update the others."),
+                  [_side(f.conn, dl[s]) for s in dates])
+
+
+def detect_task(conn: sqlite3.Connection, card: dict) -> list[dict]:
+    """Run every registered task rule on one task card."""
+    st = card["status"]
+    facts = TaskFacts(conn=conn, card=card, name=(f"#{card['number']} " if card["number"] else "") + card["title"],
+                      status=st, done={s for s, c in st.items() if c["value"] in FINISHED},
+                      notdone={s for s, c in st.items() if c["value"] in NOT_DONE},
+                      chat_blocked=st.get("chat", {}).get("value") == "blocked")
+    return [d for rule in TASK_RULES for d in rule(facts)]
 
 
 def detect_plan(conn: sqlite3.Connection, llm: LLM | None) -> list[dict]:

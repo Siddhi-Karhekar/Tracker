@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from teampulse import actions, auth, ui, webapp
+from teampulse import actions, auth, queries, ui, webapp
 
 actor = webapp.require_page("team")
 conn = webapp.get_agent().conn
@@ -63,8 +63,8 @@ add, people, capabilities, visibility, assistants, activity = st.tabs([
     "Add a teammate", "Accounts", "Capabilities", "What members can see", "AI assistant connections", "Activity"])
 
 with add:
-    members = [r[0] for r in conn.execute("SELECT display_name FROM members ORDER BY display_name")]
-    taken = {r[0] for r in conn.execute("SELECT member_name FROM users WHERE member_name IS NOT NULL")}
+    members = queries.member_names(conn)
+    taken = queries.members_with_accounts(conn)
     with st.form("create", clear_on_submit=True):
         c1, c2 = st.columns(2)
         name = c1.text_input("Name", max_chars=60, placeholder="Riya Mehta")
@@ -166,8 +166,7 @@ with visibility:
                 st.error(str(exc))
 
 with activity:
-    rows = conn.execute("SELECT at, actor_name, action, target, outcome FROM audit_log WHERE action != 'ask' "
-                        "ORDER BY id DESC LIMIT 100").fetchall()
+    rows = queries.activity_log(conn, limit=100, skip_questions=True)
     if rows:
         frame = pd.DataFrame([{"When": ui.ago(r["at"]), "Who": r["actor_name"] or "(not signed in)",
                                "What": r["action"], "On": r["target"] or "", "Result": r["outcome"]} for r in rows])

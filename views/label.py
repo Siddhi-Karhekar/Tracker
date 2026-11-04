@@ -3,7 +3,7 @@ import json
 
 import streamlit as st
 
-from teampulse import actions, ui
+from teampulse import actions, queries, ui
 from teampulse.signals import TYPES, build_windows, load_messages
 from teampulse.webapp import get_agent, require_page
 
@@ -15,8 +15,8 @@ NAME = {"blocker": "Blocker", "help_request": "Help request", "decision": "Decis
 ui.header("Label chat", "Say what each message is, without looking at what TeamPulse guessed. Your labels are the "
           "answer key for measuring its accuracy, and they stay in your local database.")
 
-total = conn.execute("SELECT COUNT(*) FROM events WHERE source='discord' AND kind='message'").fetchone()[0]
-done = conn.execute("SELECT COUNT(*) FROM labels l JOIN events e ON e.id = l.event_id").fetchone()[0]
+total = queries.discord_message_count(conn)
+done = queries.labelled_count(conn)
 st.progress(min(done / 300, 1.0), text=f"{done} of 300 labelled ({total} messages available)")
 
 with st.sidebar:
@@ -27,17 +27,12 @@ with st.sidebar:
                 "**Chatter**: greetings, jokes, \"ok\", off-topic.  \n\n"
                 "Progress and a request in one message counts as a help request.")
 
-row = conn.execute(   # next unlabelled message, in a stable shuffled order across channels
-    "SELECT e.* FROM events e LEFT JOIN labels l ON l.event_id = e.id "
-    "WHERE e.source='discord' AND e.kind='message' AND l.event_id IS NULL "
-    "ORDER BY substr(e.native_id, -3) || e.native_id LIMIT 1").fetchone()
+row = queries.next_unlabelled_message(conn)   # in a stable shuffled order across channels
 
 if row is None:
     ui.empty("Everything is labelled.", "Run the evaluation below to see how accurate TeamPulse is.")
 else:
-    context = conn.execute(
-        "SELECT author_name, body FROM events WHERE source='discord' AND channel = ? AND created_at < ? "
-        "ORDER BY created_at DESC LIMIT 3", (row["channel"], row["created_at"])).fetchall()[::-1]
+    context = queries.messages_before(conn, row["channel"], row["created_at"], limit=3)
     earlier = "".join(f"<p class='tp-meta' style='margin:.15rem 0'><b>{ui.e(c['author_name'])}</b>: {ui.e(c['body'])}</p>"
                       for c in context)
     st.markdown(f"<div class='tp-row'>{earlier}<p class='tp-display' style='font-size:1.35rem;margin:.6rem 0 .2rem 0'>"
@@ -52,8 +47,7 @@ else:
         actions.add_label(conn, actor, row["id"], "skip")
         st.rerun()
 
-recent = conn.execute("SELECT l.event_id, l.label, e.body FROM labels l JOIN events e ON e.id = l.event_id "
-                      "ORDER BY l.labelled_at DESC LIMIT 5").fetchall()
+recent = queries.recent_labels(conn, limit=5)
 if recent:
     with st.expander("Your last labels"):
         for r in recent:
@@ -77,7 +71,7 @@ if c1.button("Run evaluation on my labels", icon=":material/analytics:", disable
             st.warning(str(exc))
 
 messages = load_messages(conn)
-labels = {r[0]: r[1] for r in conn.execute("SELECT event_id, label FROM labels WHERE label != 'skip'")}
+labels = queries.labels_by_event(conn)
 lines = []
 for w, window in enumerate(build_windows(messages)):
     start = window[0].created_at
