@@ -19,14 +19,14 @@ jobs:
       security-events: write     # only this job may upload results to the Security tab
       actions: read
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@4bfa242aa49c5f7c6770b98670d354a7dfac05f8  # v3
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v3
         with:
           languages: python
           build-mode: none
           queries: security-extended
-      - uses: github/codeql-action/analyze@4bfa242aa49c5f7c6770b98670d354a7dfac05f8  # v3
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v3
         with:
           category: /language:python
